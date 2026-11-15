@@ -5,7 +5,7 @@ import { supabase } from './lib/supabase'
 import { TURKIYE_PROVINCES } from './data/provinces'
 import { SPECIALTY_GROUPS } from './data/specialties'
 
-type AuthMode = 'login' | 'signup' | 'reset'
+type AuthMode = 'login' | 'signup' | 'reset' | 'update'
 
 export default function App() {
   const [query, setQuery] = useState('')
@@ -24,8 +24,14 @@ export default function App() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthMode('update')
+        setAuthOpen(true)
+        setMessage('')
+        setErrorMessage('')
+      }
     })
     return () => subscription.unsubscribe()
   }, [])
@@ -62,12 +68,18 @@ export default function App() {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
         if (error) throw error
         setMessage('Giriş başarılı. Hoş geldin.')
-      } else {
+      } else if (authMode === 'reset') {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: window.location.origin + window.location.pathname,
         })
         if (error) throw error
         setMessage('Şifre yenileme bağlantısı e-posta adresine gönderildiyse gelen kutunu kontrol et.')
+      } else {
+        const { error } = await supabase.auth.updateUser({ password })
+        if (error) throw error
+        setMessage('Şifren güncellendi. Yeni şifrenle giriş yapabilirsin.')
+        setPassword('')
+        setAuthMode('login')
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'İşlem sırasında beklenmeyen bir hata oluştu.')
@@ -97,20 +109,20 @@ export default function App() {
         <button className="auth-close" aria-label="Kapat" onClick={() => setAuthOpen(false)}>×</button>
         <div className="auth-mark">Ψ</div>
         <div className="eyebrow">THE PSYCHOLOGY NETWORK</div>
-        <h2 id="auth-title">{authMode === 'signup' ? 'Ağa katıl.' : authMode === 'login' ? 'Tekrar hoş geldin.' : 'Şifreni yenile.'}</h2>
-        <p>{authMode === 'signup' ? 'PSYCHORA hesabını oluştur ve profesyonel ağa katıl.' : authMode === 'login' ? 'Hesabına güvenli şekilde giriş yap.' : 'Şifre yenileme bağlantısını e-posta adresine gönderelim.'}</p>
+        <h2 id="auth-title">{authMode === 'signup' ? 'Ağa katıl.' : authMode === 'login' ? 'Tekrar hoş geldin.' : authMode === 'update' ? 'Yeni şifreni belirle.' : 'Şifreni yenile.'}</h2>
+        <p>{authMode === 'signup' ? 'PSYCHORA hesabını oluştur ve profesyonel ağa katıl.' : authMode === 'login' ? 'Hesabına güvenli şekilde giriş yap.' : authMode === 'update' ? 'Hesabın için yeni bir şifre oluştur.' : 'Şifre yenileme bağlantısını e-posta adresine gönderelim.'}</p>
         <form onSubmit={handleAuth}>
           {authMode === 'signup' && <label>Ad soyad<input autoComplete="name" value={fullName} onChange={e=>setFullName(e.target.value)} required placeholder="Adın ve soyadın"/></label>}
           <label>E-posta<input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="ornek@eposta.com"/></label>
-          {authMode !== 'reset' && <label>Şifre<input type="password" autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} value={password} onChange={e=>setPassword(e.target.value)} required minLength={8} placeholder="En az 8 karakter"/></label>}
-          <button className="auth-submit" type="submit" disabled={busy}>{busy ? 'İşleniyor...' : authMode === 'signup' ? 'Hesap oluştur' : authMode === 'login' ? 'Giriş yap' : 'Yenileme bağlantısı gönder'}</button>
+          {(authMode === 'signup' || authMode === 'login' || authMode === 'update') && <label>{authMode === 'update' ? 'Yeni şifre' : 'Şifre'}<input type="password" autoComplete={authMode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e=>setPassword(e.target.value)} required minLength={8} placeholder="En az 8 karakter"/></label>}
+          <button className="auth-submit" type="submit" disabled={busy}>{busy ? 'İşleniyor...' : authMode === 'signup' ? 'Hesap oluştur' : authMode === 'login' ? 'Giriş yap' : authMode === 'update' ? 'Şifreyi güncelle' : 'Yenileme bağlantısı gönder'}</button>
         </form>
         {message && <div className="auth-message">{message}</div>}
         {errorMessage && <div className="auth-error">{errorMessage}</div>}
         <div className="auth-links">
-          {authMode !== 'login' && <button onClick={() => { setAuthMode('login'); setMessage(''); setErrorMessage('') }}>Zaten hesabın var mı? Giriş yap</button>}
-          {authMode !== 'signup' && <button onClick={() => { setAuthMode('signup'); setMessage(''); setErrorMessage('') }}>Yeni hesap oluştur</button>}
-          {authMode !== 'reset' && <button onClick={() => { setAuthMode('reset'); setMessage(''); setErrorMessage('') }}>Şifremi unuttum</button>}
+          {authMode !== 'login' && authMode !== 'update' && <button onClick={() => { setAuthMode('login'); setMessage(''); setErrorMessage('') }}>Zaten hesabın var mı? Giriş yap</button>}
+          {authMode !== 'signup' && authMode !== 'update' && <button onClick={() => { setAuthMode('signup'); setMessage(''); setErrorMessage('') }}>Yeni hesap oluştur</button>}
+          {authMode !== 'reset' && authMode !== 'update' && <button onClick={() => { setAuthMode('reset'); setMessage(''); setErrorMessage('') }}>Şifremi unuttum</button>}
         </div>
         <small className="auth-note">Devam ederek PSYCHORA kullanım koşullarını kabul etmiş olursun.</small>
       </section>
