@@ -23,7 +23,7 @@ export default function App() {
   const [profileBusy, setProfileBusy] = useState(false)
   const [profileMessage, setProfileMessage] = useState('')
   const [profileError, setProfileError] = useState('')
-  const [profile, setProfile] = useState({ display_name: '', professional_title: '', bio: '', profile_visibility: 'public' })
+  const [profile, setProfile] = useState({ display_name: '', professional_title: '', bio: '', profile_visibility: 'public', avatar_url: '' })
   const [credentialType, setCredentialType] = useState('diploma')
   const [institution, setInstitution] = useState('')
   const [verificationNote, setVerificationNote] = useState('')
