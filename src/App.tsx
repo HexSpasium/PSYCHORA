@@ -244,7 +244,22 @@ export default function App() {
             <label>Başvuru notu<textarea rows={3} value={verificationNote} onChange={e=>setVerificationNote(e.target.value)} placeholder="İnceleme ekibine not (isteğe bağlı)"/></label>
             <button className="auth-submit" type="submit" disabled={profileBusy}>Güvenli şekilde gönder</button>
             <small className="auth-note">Belgeler özel depolama alanında tutulur; yalnızca hesabın ve yetkili doğrulama yöneticileri erişebilir.</small>
-          </form>}</div>
+          </form></div>
+          {isAdmin && <section className="admin-verification">
+            <h3>Yönetici doğrulama paneli</h3>
+            <button type="button" className="auth-submit" onClick={loadAdminRequests} disabled={adminBusy}>{adminBusy ? 'Yükleniyor…' : 'Başvuruları getir'}</button>
+            {adminRequests.map((request: any) => <article className="admin-request" key={request.id}>
+              <p><strong>{request.profiles?.display_name || 'İsimsiz kullanıcı'}</strong> · {request.profiles?.professional_title || 'Unvan belirtilmemiş'}</p>
+              <p>Belge: {request.professional_credentials?.[0]?.credential_type || 'Belge türü belirtilmemiş'} · {request.professional_credentials?.[0]?.institution || 'Kurum belirtilmemiş'}</p>
+              {request.applicant_note && <p>Not: {request.applicant_note}</p>}
+              {request.professional_credentials?.[0]?.document_path && <button type="button" onClick={() => openCredential(request.professional_credentials[0].document_path)}>Belgeyi güvenli görüntüle</button>}
+              <p>Durum: {request.status}</p>
+              {request.status === 'pending' && <div className="admin-actions">
+                <button type="button" onClick={() => reviewVerification(request, 'approved')} disabled={adminBusy}>Onayla</button>
+                <button type="button" onClick={() => reviewVerification(request, 'rejected')} disabled={adminBusy}>Reddet</button>
+              </div>}
+            </article>)}
+          </section>}
         </>}
         {profileMessage && <div className="auth-message">{profileMessage}</div>}{profileError && <div className="auth-error">{profileError}</div>}
       </section>
