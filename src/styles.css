@@ -294,3 +294,21 @@ button{transition:background-color .18s,border-color .18s,color .18s}
 .feed-comment-body{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
 .feed-comment-body strong{display:block}
 .feed-comment-body span{overflow-wrap:anywhere}
+
+
+/* Keep uploaded member portraits visible and consistently cropped in feed comments. */
+.feed-comment-avatar,
+.feed-person-avatar{
+  display:block;
+  width:36px;
+  height:36px;
+  min-width:36px;
+  flex:0 0 36px;
+  aspect-ratio:1 / 1;
+  object-fit:cover;
+  object-position:center;
+  border-radius:50%;
+  overflow:hidden;
+  background:#e4f2ed;
+}
+.feed-comment-body{min-width:0;flex:1}
