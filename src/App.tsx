@@ -31,6 +31,7 @@ export default function App() {
   const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([])
   const [specialties, setSpecialties] = useState<{id:string;name_tr:string}[]>([])
   const [credentialFile, setCredentialFile] = useState<File | null>(null)
+  const [myCredentials, setMyCredentials] = useState<any[]>([])
   const [isAdmin, setIsAdmin] = useState(false)
   const [adminRequests, setAdminRequests] = useState<any[]>([])
   const [adminBusy, setAdminBusy] = useState(false)
@@ -107,18 +108,21 @@ export default function App() {
     if (!session?.user) return
     setProfileOpen(true); setProfileBusy(true); setProfileError(''); setProfileMessage('')
     try {
-      const [{ data: p, error: pe }, { data: requests, error: re }, { data: allSpecialties, error: se }, { data: mine, error: me }, { data: roles, error: ae }] = await Promise.all([
+      const [{ data: p, error: pe }, { data: requests, error: re }, { data: allSpecialties, error: se }, { data: mine, error: me }, { data: roles, error: ae }, { data: credentials, error: ce }] = await Promise.all([
         supabase.from('profiles').select('display_name,professional_title,bio,profile_visibility').eq('id', session.user.id).maybeSingle(),
         supabase.from('verification_requests').select('status').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(1),
         supabase.from('specialties').select('id,name_tr').eq('is_active', true).order('name_tr'),
         supabase.from('user_specialties').select('specialty_id').eq('user_id', session.user.id),
         supabase.from('admin_roles').select('role').eq('user_id', session.user.id),
+        supabase.from('professional_credentials').select('id,credential_type,institution,document_path,created_at').eq('user_id', session.user.id).order('created_at', { ascending: false }),
       ])
       if (pe) throw pe
       if (re) throw re
       if (se) throw se
       if (me) throw me
       if (ae) throw ae
+      if (ce) throw ce
+      setMyCredentials(credentials || [])
       setProfile({ display_name: p?.display_name || String(session.user.user_metadata?.full_name || ''), professional_title: p?.professional_title || '', bio: p?.bio || '', profile_visibility: p?.profile_visibility || 'public' })
       setVerificationStatus(requests?.[0]?.status || '')
       setSpecialties(allSpecialties || [])
@@ -162,16 +166,21 @@ export default function App() {
       const objectPath = session.user.id + '/' + crypto.randomUUID() + '.' + ext
       const { error: uploadError } = await supabase.storage.from('credential-documents').upload(objectPath, credentialFile, { contentType: credentialFile.type, upsert: false })
       if (uploadError) throw uploadError
-      const { error: credentialError } = await supabase.from('professional_credentials').insert({ user_id: session.user.id, credential_type: credentialType, institution: institution.trim() || null, document_path: objectPath })
+      const { data: newCredential, error: credentialError } = await supabase.from('professional_credentials').insert({ user_id: session.user.id, credential_type: credentialType, institution: institution.trim() || null, document_path: objectPath }).select('id,credential_type,institution,document_path,created_at').single()
       if (credentialError) {
         await supabase.storage.from('credential-documents').remove([objectPath])
         throw credentialError
       }
       const { error: requestError } = await supabase.from('verification_requests').insert({ user_id: session.user.id, applicant_note: verificationNote.trim() || null })
-      if (requestError) throw requestError
+      if (requestError) {
+        await supabase.from('professional_credentials').delete().eq('id', newCredential.id)
+        await supabase.storage.from('credential-documents').remove([objectPath])
+        throw requestError
+      }
+      setMyCredentials(old => [newCredential, ...old])
       setVerificationStatus('pending')
       await supabase.from('profiles').update({ verification_status: 'pending', updated_at: new Date().toISOString() }).eq('id', session.user.id)
-      setProfileMessage('Doğrulama başvurun alındı. Bu form dosya yüklemez; belge yükleme alanı ayrıca kurulacak.')
+      setProfileMessage('Belgen güvenli depoya yüklendi ve doğrulama başvurun incelemeye gönderildi.')
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Başvuru gönderilemedi.') }
     finally { setProfileBusy(false) }
   }
@@ -223,6 +232,22 @@ export default function App() {
     finally { setAdminBusy(false) }
   }
 
+  const deleteMyCredential = async (credential: any) => {
+    if (!session?.user || !window.confirm('Bu belge kaydını ve yüklenmiş dosyasını silmek istiyor musun?')) return
+    setProfileBusy(true); setProfileError(''); setProfileMessage('')
+    try {
+      if (credential.document_path) {
+        const { error: fileError } = await supabase.storage.from('credential-documents').remove([credential.document_path])
+        if (fileError) throw fileError
+      }
+      const { error } = await supabase.from('professional_credentials').delete().eq('id', credential.id).eq('user_id', session.user.id)
+      if (error) throw error
+      setMyCredentials(old => old.filter(item => item.id !== credential.id))
+      setProfileMessage('Belge kaydı silindi.')
+    } catch (error) { setProfileError(error instanceof Error ? error.message : 'Belge silinemedi.') }
+    finally { setProfileBusy(false) }
+  }
+
   const openCredential = async (path: string) => {
     const { data, error } = await supabase.storage.from('credential-documents').createSignedUrl(path, 60)
     if (error) { setProfileError(error.message); return }
@@ -259,6 +284,7 @@ export default function App() {
             <button className="auth-submit" type="submit" disabled={profileBusy}>Profili kaydet</button>
           </form>
           <div className="verification-box"><h3>Mesleki kimlik doğrulaması</h3><p>Başvuru durumu: <strong>{verificationStatus==='pending'?'İncelemede':verificationStatus==='approved'?'Onaylandı':verificationStatus==='rejected'?'Reddedildi':verificationStatus==='resubmission'?'Yeniden başvuru gerekli':'Başvuru yok'}</strong></p>
+          <div className="my-credentials"><b>Yüklediğim belgeler</b>{myCredentials.length ? myCredentials.map((item:any)=><div className="my-credential" key={item.id}><span>{item.credential_type} · {item.institution || 'Kurum belirtilmedi'}</span><button type="button" onClick={()=>item.document_path ? openCredential(item.document_path) : setProfileError('Bu eski kayıtta dosya bulunmuyor.')} disabled={!item.document_path}>Görüntüle</button><button type="button" onClick={()=>deleteMyCredential(item)} disabled={profileBusy}>Sil</button></div>) : <small>Henüz belge kaydı yok.</small>}</div>
           {verificationStatus!=='pending' && verificationStatus!=='approved' && <form onSubmit={submitVerification}>
             <label>Belge türü<select value={credentialType} onChange={e=>setCredentialType(e.target.value)}><option value="diploma">Diploma</option><option value="license">Mesleki ruhsat / yetki belgesi</option><option value="student_certificate">Öğrenci belgesi</option><option value="other">Diğer</option></select></label>
             <label>Üniversite / kurum<input value={institution} onChange={e=>setInstitution(e.target.value)} placeholder="Kurum adı"/></label>
