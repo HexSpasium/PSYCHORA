@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// GitHub Pages deposu "psychora" adıyla oluşturulmalıdır.
-// Yerel geliştirmede kök dizin, üretim derlemesinde depo alt yolu kullanılır.
-export default defineConfig(({ mode }) => ({
+// GitHub Actions BASE_PATH değerini repository adına göre verir.
+// Yerel geliştirmede kök dizin kullanılır.
+export default defineConfig({
   plugins: [react()],
-  base: mode === 'production' ? '/psychora/' : '/',
-}))
+  base: process.env.BASE_PATH || '/',
+})
