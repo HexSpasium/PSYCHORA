@@ -98,6 +98,7 @@ export default function App() {
   const [postBusy, setPostBusy] = useState(false)
   const [commentDrafts, setCommentDrafts] = useState<Record<string,string>>({})
   const [followStats, setFollowStats] = useState({ followers: 0, following: 0 })
+  const [feedLive, setFeedLive] = useState(false)
 
   const loadFeed = async () => {
     if (!session?.user) { setFeedPosts([]); return }
@@ -138,6 +139,29 @@ export default function App() {
   }
 
   useEffect(() => { if (session?.user?.id) void loadFeed(); else { setFeedPosts([]); setFollowStats({followers:0,following:0}) } }, [session?.user?.id])
+
+  // Keep the social feed fresh across all signed-in clients.
+  useEffect(() => {
+    if (!session?.user?.id) { setFeedLive(false); return }
+    let refreshTimer: number | undefined
+    const refreshFeed = () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => { void loadFeed() }, 350)
+    }
+    const channel = supabase.channel('psychora-live-feed-' + session.user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, refreshFeed)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_media' }, refreshFeed)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'post_reactions' }, refreshFeed)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, refreshFeed)
+      .subscribe((status) => setFeedLive(status === 'SUBSCRIBED'))
+    const fallbackRefresh = window.setInterval(refreshFeed, 60000)
+    return () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      window.clearInterval(fallbackRefresh)
+      setFeedLive(false)
+      void supabase.removeChannel(channel)
+    }
+  }, [session?.user?.id])
 
   const createPost = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -680,7 +704,7 @@ export default function App() {
     {session && <div className="session-strip">Oturum açıldı · {session.user.email}</div>}
     {session && notificationToast && <div className="notification-toast" role="status"><span>●</span> {notificationToast} <button type="button" onClick={() => setNotificationOpen(true)}>Görüntüle</button></div>}
     {session && <section id="social-feed" className="social-shell section">
-      <div className="social-topline"><div><label>PSYCHORA SOCIAL</label><h2>Akışın</h2><p>Mesleki çevrenden güncel paylaşımlar.</p></div><button type="button" className="secondary" onClick={()=>void loadFeed()} disabled={feedBusy}>{feedBusy?'Yükleniyor…':'Akışı yenile'}</button></div>
+      <div className="social-topline"><div><label>PSYCHORA SOCIAL</label><h2>Akışın</h2><p>Mesleki çevrenden güncel paylaşımlar.</p><span className={feedLive ? 'feed-live-status is-live' : 'feed-live-status'}><i />{feedLive ? 'Canlı akış aktif' : 'Bağlantı kuruluyor'}</span></div><button type="button" className="secondary" onClick={()=>void loadFeed()} disabled={feedBusy}>{feedBusy?'Yükleniyor…':'Akışı yenile'}</button></div>
       <div className="social-layout">
         <aside className="social-sidebar"><div className="social-user-card"><div className="social-avatar">{(profile.display_name || session.user.user_metadata?.full_name || session.user.email || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><strong>{profile.display_name || session.user.user_metadata?.full_name || 'Profilin'}</strong><small>{profile.professional_title || 'Psikoloji profesyoneli'}</small></div><a href="#social-feed">⌂ Akış</a><a href="#professionals">⌕ Keşfet</a><a href="#social-network">♧ Takip ağım</a><button type="button" onClick={()=>void openProfile()}>Profilimi düzenle</button></aside>
         <div className="social-main-column">
