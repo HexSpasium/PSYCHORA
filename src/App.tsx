@@ -64,7 +64,7 @@ export default function App() {
         .select('id,display_name,professional_title,bio,verification_status')
         .eq('profile_visibility', 'public')
         .order('display_name')
-        .limit(100)
+        .limit(500)
       if (profileError) throw profileError
       const ids = (profiles || []).map((p:any) => p.id)
       if (!ids.length) { setDirectory([]); setDirectoryLoaded(true); return }
