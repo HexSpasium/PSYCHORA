@@ -48,6 +48,7 @@ export default function App() {
   const [messageDraft, setMessageDraft] = useState('')
   const [messageBusy, setMessageBusy] = useState(false)
   const [incomingRequests, setIncomingRequests] = useState<any[]>([])
+  const [unreadMessages, setUnreadMessages] = useState<any[]>([])
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [notificationError, setNotificationError] = useState('')
   const [notificationToast, setNotificationToast] = useState('')
@@ -147,11 +148,26 @@ export default function App() {
   useEffect(() => {
     if (!session?.user?.id) {
       setIncomingRequests([])
+      setUnreadMessages([])
       setNotificationOpen(false)
       return
     }
     const userId = session.user.id
     void loadIncomingRequests()
+    void loadUnreadMessages()
+    const messageChannel = supabase
+      .channel('psychora-message-notifications-' + userId)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'direct_messages', filter: 'recipient_id=eq.' + userId,
+      }, () => {
+        setNotificationToast('Yeni bir mesajın var.')
+        window.setTimeout(() => setNotificationToast(''), 6000)
+        void loadUnreadMessages()
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'direct_messages', filter: 'recipient_id=eq.' + userId,
+      }, () => void loadUnreadMessages())
+      .subscribe()
     const channel = supabase
       .channel('psychora-connection-notifications-' + userId)
       .on('postgres_changes', {
@@ -171,8 +187,46 @@ export default function App() {
     return () => {
       window.clearInterval(refresh)
       void supabase.removeChannel(channel)
+      void supabase.removeChannel(messageChannel)
     }
   }, [session?.user?.id])
+
+  const loadUnreadMessages = async () => {
+    if (!session?.user) { setUnreadMessages([]); return }
+    const { data: messages, error } = await supabase.from('direct_messages')
+      .select('id,sender_id,recipient_id,content,created_at')
+      .eq('recipient_id', session.user.id)
+      .is('read_at', null)
+      .order('created_at', { ascending: false })
+      .limit(50)
+    if (error) { setNotificationError(error.message); return }
+    const senderIds = [...new Set((messages || []).map((item: any) => item.sender_id))]
+    const { data: profiles, error: profilesError } = senderIds.length
+      ? await supabase.from('profiles').select('id,display_name,professional_title').in('id', senderIds)
+      : { data: [], error: null }
+    if (profilesError) { setNotificationError(profilesError.message); return }
+    const profileById = new Map((profiles || []).map((item: any) => [item.id, item]))
+    setUnreadMessages((messages || []).map((item: any) => ({
+      ...item,
+      sender: profileById.get(item.sender_id) || null,
+    })))
+  }
+
+  const openMessageNotification = async (item: any) => {
+    const person = directory.find((entry: any) => entry.id === item.sender_id) || {
+      id: item.sender_id,
+      display_name: item.sender?.display_name || 'Profesyonel',
+      professional_title: item.sender?.professional_title || '',
+      specialties: [],
+    }
+    setSelectedProfessional(person)
+    setConnectionRequest({ requester_id: item.sender_id, recipient_id: session?.user?.id, status: 'accepted' })
+    setNotificationOpen(false)
+    try { await loadThread(person) } catch (error) {
+      setNotificationError(error instanceof Error ? error.message : 'Mesajlar yüklenemedi.')
+    }
+    await loadUnreadMessages()
+  }
 
   const respondToNotification = async (request: any, status: 'accepted' | 'rejected') => {
     if (!session?.user) return
@@ -511,7 +565,7 @@ export default function App() {
   }
 
   return <main className="page">
-    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><div className="notification-wrap"><button className="notification-trigger" type="button" aria-expanded={notificationOpen} aria-label={incomingRequests.length ? 'Bildirimler, ' + incomingRequests.length + ' bekleyen bağlantı isteği' : 'Bildirimler'} onClick={() => { setNotificationOpen(value => !value); void loadIncomingRequests() }}><span className="notification-bell">♧</span> Bildirimler{incomingRequests.length > 0 && <b className="notification-count">{incomingRequests.length > 99 ? '99+' : incomingRequests.length}</b>}</button>{notificationOpen && <section className="notification-panel" aria-label="Bildirimler"><div className="notification-panel-heading"><strong>Bildirimler</strong><span>{incomingRequests.length} bekleyen istek</span></div>{notificationError && <p className="notification-error">{notificationError}</p>}{incomingRequests.length ? incomingRequests.map((request: any) => <article className="notification-item" key={request.id}><div className="notification-avatar">{(request.requester?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div className="notification-content"><strong>{request.requester?.display_name || 'Bir profesyonel'}</strong><span>{request.requester?.professional_title || 'Psikoloji profesyoneli'} seninle bağlantı kurmak istiyor.</span><time>{new Date(request.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><div className="notification-actions"><button type="button" onClick={() => void respondToNotification(request,'accepted')}>Kabul et</button><button type="button" onClick={() => void respondToNotification(request,'rejected')}>Reddet</button></div></div></article>) : <p className="notification-empty">Şimdilik yeni bildirimin yok.</p>}</section>}</div><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
+    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><div className="notification-wrap"><button className="notification-trigger" type="button" aria-expanded={notificationOpen} aria-label={'Bildirimler, ' + (incomingRequests.length + unreadMessages.length) + ' okunmamış bildirim'} onClick={() => { setNotificationOpen(value => !value); void loadIncomingRequests(); void loadUnreadMessages() }}><span className="notification-bell">♧</span> Bildirimler{incomingRequests.length + unreadMessages.length > 0 && <b className="notification-count">{incomingRequests.length + unreadMessages.length > 99 ? '99+' : incomingRequests.length + unreadMessages.length}</b>}</button>{notificationOpen && <section className="notification-panel" aria-label="Bildirimler"><div className="notification-panel-heading"><strong>Bildirimler</strong><span>{incomingRequests.length + unreadMessages.length} yeni bildirim</span></div>{notificationError && <p className="notification-error">{notificationError}</p>}{unreadMessages.map((item: any) => <button type="button" className="notification-item notification-message-item" key={'message-' + item.id} onClick={() => void openMessageNotification(item)}><span className="notification-avatar">{(item.sender?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</span><span className="notification-content"><strong>{item.sender?.display_name || 'Bir profesyonel'}</strong><span>Sana yeni bir mesaj gönderdi: {(item.content || '').slice(0, 90)}{(item.content || '').length > 90 ? '…' : ''}</span><time>{new Date(item.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time></span></button>)}{incomingRequests.map((request: any) => <article className="notification-item" key={request.id}><div className="notification-avatar">{(request.requester?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div className="notification-content"><strong>{request.requester?.display_name || 'Bir profesyonel'}</strong><span>{request.requester?.professional_title || 'Psikoloji profesyoneli'} seninle bağlantı kurmak istiyor.</span><time>{new Date(request.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><div className="notification-actions"><button type="button" onClick={() => void respondToNotification(request,'accepted')}>Kabul et</button><button type="button" onClick={() => void respondToNotification(request,'rejected')}>Reddet</button></div></div></article>)}{!incomingRequests.length && !unreadMessages.length && <p className="notification-empty">Şimdilik yeni bildirimin yok.</p>}</section>}</div><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
     {session && <div className="session-strip">Oturum açıldı · {session.user.email}</div>}
     {session && notificationToast && <div className="notification-toast" role="status"><span>●</span> {notificationToast} <button type="button" onClick={() => setNotificationOpen(true)}>Görüntüle</button></div>}
     <section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
