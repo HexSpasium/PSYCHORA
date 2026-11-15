@@ -35,6 +35,52 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [adminRequests, setAdminRequests] = useState<any[]>([])
   const [adminBusy, setAdminBusy] = useState(false)
+  const [directory, setDirectory] = useState<any[]>([])
+  const [directoryBusy, setDirectoryBusy] = useState(false)
+  const [directoryLoaded, setDirectoryLoaded] = useState(false)
+  const [directorySearch, setDirectorySearch] = useState('')
+  const [directorySpecialty, setDirectorySpecialty] = useState('')
+
+  const loadDirectory = async () => {
+    if (!session?.user) return
+    setDirectoryBusy(true)
+    try {
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('id,display_name,professional_title,bio,verification_status')
+        .eq('profile_visibility', 'public')
+        .order('display_name')
+        .limit(100)
+      if (profileError) throw profileError
+      const ids = (profiles || []).map((p:any) => p.id)
+      if (!ids.length) { setDirectory([]); setDirectoryLoaded(true); return }
+      const [{ data: links, error: linksError }, { data: allSpecialties, error: specialtiesError }] = await Promise.all([
+        supabase.from('user_specialties').select('user_id,specialty_id').in('user_id', ids),
+        supabase.from('specialties').select('id,name_tr').eq('is_active', true),
+      ])
+      if (linksError) throw linksError
+      if (specialtiesError) throw specialtiesError
+      const names = new Map((allSpecialties || []).map((s:any) => [s.id, s.name_tr]))
+      const byUser = new Map<string,string[]>()
+      for (const link of links || []) {
+        const list = byUser.get(link.user_id) || []
+        const name = names.get(link.specialty_id)
+        if (name) list.push(name)
+        byUser.set(link.user_id, list)
+      }
+      setDirectory((profiles || []).map((p:any) => ({...p, specialties: byUser.get(p.id) || []})))
+      setDirectoryLoaded(true)
+    } catch (error) {
+      console.error('Directory load failed', error)
+      setDirectoryLoaded(false)
+    } finally { setDirectoryBusy(false) }
+  }
+
+  const filteredDirectory = useMemo(() => directory.filter(person => {
+    const term = directorySearch.trim().toLocaleLowerCase('tr')
+    const text = [person.display_name, person.professional_title, person.bio, ...(person.specialties || [])].filter(Boolean).join(' ').toLocaleLowerCase('tr')
+    return (!term || text.includes(term)) && (!directorySpecialty || (person.specialties || []).includes(directorySpecialty))
+  }), [directory, directorySearch, directorySpecialty])
 
   const provinces = useMemo(() => TURKIYE_PROVINCES.filter(p => p.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr'))), [query])
 
@@ -51,6 +97,11 @@ export default function App() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    if (session?.user) void loadDirectory()
+    else { setDirectory([]); setDirectoryLoaded(false) }
+  }, [session?.user?.id])
 
   const openAuth = (mode: AuthMode) => {
     setAuthMode(mode)
@@ -297,6 +348,24 @@ export default function App() {
     <section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
     <section className="stats"><div><b>81</b><span>Türkiye ili</span></div><div><b>12+</b><span>Uzmanlık kümesi</span></div><div><b>GLOBAL</b><span>Uluslararası mimari</span></div></section>
     <section id="fields" className="section"><label>DISCOVER YOUR FIELD</label><h2>Psikolojinin farklı <em>uzmanlıkları.</em></h2><div className="cards">{SPECIALTY_GROUPS.map(s=><article key={s.id}><small>{s.id.toUpperCase()}</small><h3>{s.name}</h3><p>{s.topics.join(' · ')}</p></article>)}</div></section>
+    <section id="professionals" className="section directory">
+      <label>PSYCHORA PROFESSIONAL DIRECTORY</label><h2>Uzmanını bul, <em>bağlantı kur.</em></h2>
+      <p>Herkese açık profesyonel profilleri uzmanlık alanlarına göre keşfet.</p>
+      {!session ? <div className="directory-gate"><span>Profesyonel profilleri görüntülemek için giriş yap.</span><button className="primary" onClick={() => openAuth('login')}>Giriş yap</button></div> : <>
+        <div className="directory-filters">
+          <input value={directorySearch} onChange={e=>setDirectorySearch(e.target.value)} placeholder="İsim, unvan veya uzmanlık ara..."/>
+          <select value={directorySpecialty} onChange={e=>setDirectorySpecialty(e.target.value)}><option value="">Tüm uzmanlık alanları</option>{specialties.length ? specialties.map(s=><option key={s.id} value={s.name_tr}>{s.name_tr}</option>) : [...new Set(directory.flatMap(p=>p.specialties))].sort().map(s=><option key={s} value={s}>{s}</option>)}</select>
+          <button type="button" onClick={loadDirectory} disabled={directoryBusy}>{directoryBusy ? 'Yükleniyor…' : 'Yenile'}</button>
+        </div>
+        {directoryBusy && !directoryLoaded ? <p>Profesyoneller yükleniyor…</p> : filteredDirectory.length ? <div className="directory-grid">{filteredDirectory.map(person=><article className="directory-card" key={person.id}>
+          <div className="directory-avatar">{(person.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
+          <div className="directory-person"><h3>{person.display_name || 'İsimsiz profesyonel'} {person.verification_status==='verified' && <span className="verified-mark" title="Mesleki doğrulaması onaylandı">✓ Doğrulandı</span>}</h3>
+          <b>{person.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
+          {person.bio && <p>{person.bio}</p>}
+          <div className="directory-tags">{person.specialties.map((s:string)=><span key={s}>{s}</span>)}</div></div>
+        </article>)}</div> : <p>{directoryLoaded ? 'Aramana uygun herkese açık profesyonel profili bulunamadı.' : 'Profesyonel profiller şu anda yüklenemedi. Yenile butonunu kullanabilirsin.'}</p>}
+      </>}
+    </section>
     <section id="turkiye" className="section location"><label>TÜRKİYE FIRST · GLOBAL BY DESIGN</label><h2>81 ilden, <em>dünyaya açılan ağ.</em></h2><p>İlk odağımız Türkiye'nin 81 ili. Altyapı farklı ülkeler ve bölgelere genişleyebilecek şekilde tasarlanıyor.</p><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Şehir ara..."/><div className="cities">{provinces.map(p=><button className={city===p?'chosen':''} key={p} onClick={()=>setCity(p)}>{p}</button>)}</div>{city && <p className="chosen-text">Seçilen şehir: {city}</p>}</section>
     <section id="about" className="section about"><label>ONE PROFESSION. ONE NETWORK.</label><h2>Mesleki dünyanın ortak zemini.</h2><p>PSYCHORA; psikoloji profesyonellerini bilimsel paylaşım, mesleki bağlantı ve profesyonel gelişim için bir araya getirmeyi amaçlar.</p>{!session && <button className="primary" onClick={() => openAuth('signup')}>PSYCHORA'ya katıl ↗</button>}</section>
     <footer>© {new Date().getFullYear()} PSYCHORA · Türkiye'den dünyaya.</footer>
