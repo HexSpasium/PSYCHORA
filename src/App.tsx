@@ -47,6 +47,10 @@ export default function App() {
   const [threadMessages, setThreadMessages] = useState<any[]>([])
   const [messageDraft, setMessageDraft] = useState('')
   const [messageBusy, setMessageBusy] = useState(false)
+  const [incomingRequests, setIncomingRequests] = useState<any[]>([])
+  const [notificationOpen, setNotificationOpen] = useState(false)
+  const [notificationError, setNotificationError] = useState('')
+  const [notificationToast, setNotificationToast] = useState('')
 
   const loadDirectory = async () => {
     if (!session?.user) return
@@ -110,6 +114,87 @@ export default function App() {
     if (session?.user) void loadDirectory()
     else { setDirectory([]); setDirectoryLoaded(false) }
   }, [session?.user?.id])
+
+  const loadIncomingRequests = async () => {
+    if (!session?.user) { setIncomingRequests([]); return }
+    const { data: requests, error } = await supabase
+      .from('connection_requests')
+      .select('id,requester_id,recipient_id,status,created_at')
+      .eq('recipient_id', session.user.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(50)
+    if (error) {
+      setNotificationError(error.message)
+      return
+    }
+    const requesterIds = [...new Set((requests || []).map((request: any) => request.requester_id))]
+    const { data: profiles, error: profilesError } = requesterIds.length
+      ? await supabase.from('profiles').select('id,display_name,professional_title').in('id', requesterIds)
+      : { data: [], error: null }
+    if (profilesError) {
+      setNotificationError(profilesError.message)
+      return
+    }
+    const profileById = new Map((profiles || []).map((profile: any) => [profile.id, profile]))
+    setIncomingRequests((requests || []).map((request: any) => ({
+      ...request,
+      requester: profileById.get(request.requester_id) || null,
+    })))
+    setNotificationError('')
+  }
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setIncomingRequests([])
+      setNotificationOpen(false)
+      return
+    }
+    const userId = session.user.id
+    void loadIncomingRequests()
+    const channel = supabase
+      .channel('psychora-connection-notifications-' + userId)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'connection_requests',
+        filter: 'recipient_id=eq.' + userId,
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setNotificationToast('Yeni bir bağlantı isteğin var.')
+          window.setTimeout(() => setNotificationToast(''), 6000)
+        }
+        void loadIncomingRequests()
+      })
+      .subscribe()
+    const refresh = window.setInterval(() => void loadIncomingRequests(), 30000)
+    return () => {
+      window.clearInterval(refresh)
+      void supabase.removeChannel(channel)
+    }
+  }, [session?.user?.id])
+
+  const respondToNotification = async (request: any, status: 'accepted' | 'rejected') => {
+    if (!session?.user) return
+    const { error } = await supabase.from('connection_requests')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', request.id)
+      .eq('recipient_id', session.user.id)
+      .eq('status', 'pending')
+    if (error) {
+      setNotificationError(error.message)
+      return
+    }
+    await loadIncomingRequests()
+    if (selectedProfessional?.id === request.requester_id) {
+      setConnectionRequest({ ...request, status })
+      if (status === 'accepted') {
+        try { await loadThread(selectedProfessional) } catch (e) {
+          setNotificationError(e instanceof Error ? e.message : 'Bağlantı kuruldu ancak mesajlar yüklenemedi.')
+        }
+      }
+    }
+  }
 
   const loadConnection = async (person: any) => {
     if (!session?.user || !person?.id || person.id === session.user.id) return
@@ -426,8 +511,9 @@ export default function App() {
   }
 
   return <main className="page">
-    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
+    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><div className="notification-wrap"><button className="notification-trigger" type="button" aria-expanded={notificationOpen} aria-label={incomingRequests.length ? 'Bildirimler, ' + incomingRequests.length + ' bekleyen bağlantı isteği' : 'Bildirimler'} onClick={() => { setNotificationOpen(value => !value); void loadIncomingRequests() }}><span className="notification-bell">♧</span> Bildirimler{incomingRequests.length > 0 && <b className="notification-count">{incomingRequests.length > 99 ? '99+' : incomingRequests.length}</b>}</button>{notificationOpen && <section className="notification-panel" aria-label="Bildirimler"><div className="notification-panel-heading"><strong>Bildirimler</strong><span>{incomingRequests.length} bekleyen istek</span></div>{notificationError && <p className="notification-error">{notificationError}</p>}{incomingRequests.length ? incomingRequests.map((request: any) => <article className="notification-item" key={request.id}><div className="notification-avatar">{(request.requester?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div className="notification-content"><strong>{request.requester?.display_name || 'Bir profesyonel'}</strong><span>{request.requester?.professional_title || 'Psikoloji profesyoneli'} seninle bağlantı kurmak istiyor.</span><time>{new Date(request.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><div className="notification-actions"><button type="button" onClick={() => void respondToNotification(request,'accepted')}>Kabul et</button><button type="button" onClick={() => void respondToNotification(request,'rejected')}>Reddet</button></div></div></article>) : <p className="notification-empty">Şimdilik yeni bildirimin yok.</p>}</section>}</div><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
     {session && <div className="session-strip">Oturum açıldı · {session.user.email}</div>}
+    {session && notificationToast && <div className="notification-toast" role="status"><span>●</span> {notificationToast} <button type="button" onClick={() => setNotificationOpen(true)}>Görüntüle</button></div>}
     <section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
     <section className="stats"><div><b>81</b><span>Türkiye ili</span></div><div><b>12+</b><span>Uzmanlık kümesi</span></div><div><b>GLOBAL</b><span>Uluslararası mimari</span></div></section>
     <section id="fields" className="section"><label>DISCOVER YOUR FIELD</label><h2>Psikolojinin farklı <em>uzmanlıkları.</em></h2><div className="cards">{SPECIALTY_GROUPS.map(s=><article key={s.id}><small>{s.id.toUpperCase()}</small><h3>{s.name}</h3><p>{s.topics.join(' · ')}</p></article>)}</div></section>
