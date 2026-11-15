@@ -315,3 +315,7 @@ button{transition:background-color .18s,border-color .18s,color .18s}
 
 /* Uploaded member portraits */
 .composer-head>.social-avatar,.social-user-card>.social-avatar{object-fit:cover;overflow:hidden}
+
+/* Sidebar navigation controls */
+.social-sidebar>button{appearance:none;border:0;background:transparent;color:var(--muted,#536b75);font:inherit;text-align:left;width:100%;padding:12px 14px;border-radius:10px;cursor:pointer;transition:background .18s ease,color .18s ease}
+.social-sidebar>button:hover,.social-sidebar>button.side-nav-active{background:rgba(45,137,132,.10);color:#247f79}
