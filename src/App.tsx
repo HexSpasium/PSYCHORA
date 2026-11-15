@@ -170,6 +170,7 @@ export default function App() {
       const { error: requestError } = await supabase.from('verification_requests').insert({ user_id: session.user.id, applicant_note: verificationNote.trim() || null })
       if (requestError) throw requestError
       setVerificationStatus('pending')
+      await supabase.from('profiles').update({ verification_status: 'pending', updated_at: new Date().toISOString() }).eq('id', session.user.id)
       setProfileMessage('Doğrulama başvurun alındı. Bu form dosya yüklemez; belge yükleme alanı ayrıca kurulacak.')
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Başvuru gönderilemedi.') }
     finally { setProfileBusy(false) }
@@ -192,7 +193,7 @@ export default function App() {
     try {
       const { error: requestError } = await supabase.from('verification_requests').update({ status, reviewed_by: session.user.id, reviewed_at: new Date().toISOString() }).eq('id', request.id)
       if (requestError) throw requestError
-      const { error: profileErrorUpdate } = await supabase.from('profiles').update({ verification_status: status === 'approved' ? 'verified' : 'unverified', updated_at: new Date().toISOString() }).eq('id', request.user_id)
+      const { error: profileErrorUpdate } = await supabase.from('profiles').update({ verification_status: status === 'approved' ? 'verified' : 'rejected', updated_at: new Date().toISOString() }).eq('id', request.user_id)
       if (profileErrorUpdate) throw profileErrorUpdate
       setProfileMessage(status === 'approved' ? 'Başvuru onaylandı.' : 'Başvuru reddedildi.')
       await loadAdminRequests()
