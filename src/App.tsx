@@ -19,6 +19,15 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [profileBusy, setProfileBusy] = useState(false)
+  const [profileMessage, setProfileMessage] = useState('')
+  const [profileError, setProfileError] = useState('')
+  const [profile, setProfile] = useState({ display_name: '', professional_title: '', bio: '', profile_visibility: 'public' })
+  const [credentialType, setCredentialType] = useState('diploma')
+  const [institution, setInstitution] = useState('')
+  const [verificationNote, setVerificationNote] = useState('')
+  const [verificationStatus, setVerificationStatus] = useState('')
 
   const provinces = useMemo(() => TURKIYE_PROVINCES.filter(p => p.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr'))), [query])
 
@@ -88,6 +97,52 @@ export default function App() {
     }
   }
 
+  const openProfile = async () => {
+    if (!session?.user) return
+    setProfileOpen(true); setProfileBusy(true); setProfileError(''); setProfileMessage('')
+    try {
+      const [{ data: p, error: pe }, { data: requests, error: re }] = await Promise.all([
+        supabase.from('profiles').select('display_name,professional_title,bio,profile_visibility').eq('id', session.user.id).maybeSingle(),
+        supabase.from('verification_requests').select('status').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(1),
+      ])
+      if (pe) throw pe
+      if (re) throw re
+      setProfile({ display_name: p?.display_name || String(session.user.user_metadata?.full_name || ''), professional_title: p?.professional_title || '', bio: p?.bio || '', profile_visibility: p?.profile_visibility || 'public' })
+      setVerificationStatus(requests?.[0]?.status || '')
+    } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profil yüklenemedi.') }
+    finally { setProfileBusy(false) }
+  }
+
+  const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!session?.user) return
+    setProfileBusy(true); setProfileError(''); setProfileMessage('')
+    try {
+      const { error } = await supabase.from('profiles').update({ ...profile, updated_at: new Date().toISOString() }).eq('id', session.user.id)
+      if (error) throw error
+      setProfileMessage('Profil bilgilerin kaydedildi.')
+    } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profil kaydedilemedi.') }
+    finally { setProfileBusy(false) }
+  }
+
+  const submitVerification = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!session?.user) return
+    setProfileBusy(true); setProfileError(''); setProfileMessage('')
+    try {
+      const { data: pending, error: checkError } = await supabase.from('verification_requests').select('id').eq('user_id', session.user.id).eq('status', 'pending').limit(1)
+      if (checkError) throw checkError
+      if (pending?.length) throw new Error('Zaten incelemede olan bir başvurun var.')
+      const { error: credentialError } = await supabase.from('professional_credentials').insert({ user_id: session.user.id, credential_type: credentialType, institution: institution.trim() || null })
+      if (credentialError) throw credentialError
+      const { error: requestError } = await supabase.from('verification_requests').insert({ user_id: session.user.id, applicant_note: verificationNote.trim() || null })
+      if (requestError) throw requestError
+      setVerificationStatus('pending')
+      setProfileMessage('Doğrulama başvurun alındı. Bu form dosya yüklemez; belge yükleme alanı ayrıca kurulacak.')
+    } catch (error) { setProfileError(error instanceof Error ? error.message : 'Başvuru gönderilemedi.') }
+    finally { setProfileBusy(false) }
+  }
+
   const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut()
     if (error) setErrorMessage(error.message)
@@ -95,7 +150,7 @@ export default function App() {
   }
 
   return <main className="page">
-    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
+    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
     {session && <div className="session-strip">Oturum açıldı · {session.user.email}</div>}
     <section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
     <section className="stats"><div><b>81</b><span>Türkiye ili</span></div><div><b>12+</b><span>Uzmanlık kümesi</span></div><div><b>GLOBAL</b><span>Uluslararası mimari</span></div></section>
@@ -104,6 +159,30 @@ export default function App() {
     <section id="about" className="section about"><label>ONE PROFESSION. ONE NETWORK.</label><h2>Mesleki dünyanın ortak zemini.</h2><p>PSYCHORA; psikoloji profesyonellerini bilimsel paylaşım, mesleki bağlantı ve profesyonel gelişim için bir araya getirmeyi amaçlar.</p>{!session && <button className="primary" onClick={() => openAuth('signup')}>PSYCHORA'ya katıl ↗</button>}</section>
     <footer>© {new Date().getFullYear()} PSYCHORA · Türkiye'den dünyaya.</footer>
 
+    {profileOpen && <div className="auth-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setProfileOpen(false) }}>
+      <section className="auth-panel profile-panel" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+        <button className="auth-close" aria-label="Kapat" onClick={() => setProfileOpen(false)}>×</button>
+        <div className="auth-mark">Ψ</div><div className="eyebrow">PSYCHORA PROFESSIONAL</div><h2 id="profile-title">Profesyonel profilin</h2>
+        {profileBusy ? <p>Yükleniyor…</p> : <>
+          <form onSubmit={saveProfile}>
+            <label>Ad soyad<input required value={profile.display_name} onChange={e=>setProfile({...profile,display_name:e.target.value})}/></label>
+            <label>Mesleki unvan<input value={profile.professional_title} onChange={e=>setProfile({...profile,professional_title:e.target.value})} placeholder="Örn. Klinik Psikolog"/></label>
+            <label>Kısa biyografi<textarea rows={4} value={profile.bio} onChange={e=>setProfile({...profile,bio:e.target.value})} placeholder="Mesleki ilgi alanların ve deneyimin"/></label>
+            <label>Profil görünürlüğü<select value={profile.profile_visibility} onChange={e=>setProfile({...profile,profile_visibility:e.target.value})}><option value="public">Herkese açık</option><option value="followers">Takipçiler</option><option value="private">Gizli</option></select></label>
+            <button className="auth-submit" type="submit" disabled={profileBusy}>Profili kaydet</button>
+          </form>
+          <div className="verification-box"><h3>Mesleki kimlik doğrulaması</h3><p>Başvuru durumu: <strong>{verificationStatus==='pending'?'İncelemede':verificationStatus==='approved'?'Onaylandı':verificationStatus==='rejected'?'Reddedildi':verificationStatus==='resubmission'?'Yeniden başvuru gerekli':'Başvuru yok'}</strong></p>
+          {verificationStatus!=='pending' && verificationStatus!=='approved' && <form onSubmit={submitVerification}>
+            <label>Belge türü<select value={credentialType} onChange={e=>setCredentialType(e.target.value)}><option value="diploma">Diploma</option><option value="license">Mesleki ruhsat / yetki belgesi</option><option value="student_certificate">Öğrenci belgesi</option><option value="other">Diğer</option></select></label>
+            <label>Üniversite / kurum<input value={institution} onChange={e=>setInstitution(e.target.value)} placeholder="Kurum adı"/></label>
+            <label>Başvuru notu<textarea rows={3} value={verificationNote} onChange={e=>setVerificationNote(e.target.value)} placeholder="İnceleme ekibine not (isteğe bağlı)"/></label>
+            <button className="auth-submit" type="submit" disabled={profileBusy}>Doğrulama başvurusu gönder</button>
+            <small className="auth-note">Bu form belge dosyası yüklemez. Hassas belgelerini herkese açık bağlantıyla paylaşma; güvenli yükleme alanı ayrıca kurulacak.</small>
+          </form>}</div>
+        </>}
+        {profileMessage && <div className="auth-message">{profileMessage}</div>}{profileError && <div className="auth-error">{profileError}</div>}
+      </section>
+    </div>}
     {authOpen && <div className="auth-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setAuthOpen(false) }}>
       <section className="auth-panel" role="dialog" aria-modal="true" aria-labelledby="auth-title">
         <button className="auth-close" aria-label="Kapat" onClick={() => setAuthOpen(false)}>×</button>
