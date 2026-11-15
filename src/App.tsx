@@ -124,7 +124,7 @@ export default function App() {
       .select('id,requester_id,recipient_id,status,created_at')
       .eq('recipient_id', session.user.id)
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(1000)
     if (error) {
       setNotificationError(error.message)
       return
@@ -430,6 +430,7 @@ export default function App() {
       const updatedProfile = { ...profile }
       setDirectory(old => old.map(person => person.id === session.user.id ? { ...person, ...updatedProfile, specialties: specialties.filter(item => selectedSpecialties.includes(item.id)).map(item => item.name_tr) } : person))
       setSelectedProfessional(old => old?.id === session.user.id ? { ...old, ...updatedProfile } : old)
+      await loadDirectory()
       setProfileMessage('Profilin ve uzmanlık alanların kaydedildi. Değişiklikler keşfet bölümüne yansıtıldı.')
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profil kaydedilemedi.') }
     finally { setProfileBusy(false) }
