@@ -22,3 +22,34 @@
 
 /* Header notifications and incoming connection requests */
 .nav-account{position:relative;gap:9px}.notification-wrap{position:relative}.nav-account .notification-trigger{display:flex;align-items:center;gap:7px;white-space:nowrap}.notification-bell{font-size:16px;color:var(--teal);line-height:1}.notification-count{display:inline-grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border-radius:20px;background:#c34b40;color:white;font-size:9px}.notification-panel{position:absolute;right:0;top:calc(100% + 13px);z-index:30;width:min(390px,calc(100vw - 28px));max-height:min(560px,75vh);overflow:auto;background:#fff;border:1px solid var(--line);box-shadow:0 18px 48px rgba(16,40,60,.18);padding:16px;color:var(--navy)}.notification-panel-heading{display:flex;align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid var(--line)}.notification-panel-heading strong{font:700 15px Manrope}.notification-panel-heading span{font-size:10px;color:#75858a}.notification-item{display:flex;gap:11px;padding:14px 0;border-bottom:1px solid var(--line)}.notification-message-item{width:100%;border:0;border-bottom:1px solid var(--line);background:transparent;text-align:left;color:inherit;font:inherit;cursor:pointer}.notification-message-item:hover{background:#f4f8f6}.notification-message-item .notification-content{flex:1}.notification-avatar{flex:0 0 36px;height:36px;display:grid;place-items:center;border-radius:50%;background:#e5f1ec;color:var(--teal);font:700 15px Manrope}.notification-content{min-width:0;display:grid;gap:5px}.notification-content strong{font:600 12px Manrope}.notification-content>span{font-size:10px;line-height:1.5;color:#60727a}.notification-content time{font-size:9px;color:#8a989b}.notification-actions{display:flex;gap:7px;margin-top:5px}.nav-account .notification-actions button{padding:7px 10px;background:var(--navy);border-color:var(--navy);color:#fff}.nav-account .notification-actions button+button{background:white;border-color:var(--line);color:#8b4944}.notification-empty,.notification-error{font-size:11px;line-height:1.6;color:#718087;padding:12px 0}.notification-show-all{width:100%;margin-top:12px;padding:11px;border:1px solid var(--line);background:#edf4f1;color:var(--navy);font:600 11px Manrope;cursor:pointer}.notification-content small{font-size:9px;color:#75858a}.notification-error{color:#9c3c32}.notification-toast{position:fixed;z-index:25;top:90px;right:22px;display:flex;align-items:center;gap:10px;padding:13px 16px;background:#e5f2ec;border:1px solid #cfe3d9;box-shadow:0 8px 24px rgba(16,40,60,.12);font-size:11px;color:#286c5e}.notification-toast button{border:0;background:transparent;color:var(--navy);text-decoration:underline;cursor:pointer;font:inherit}@media(max-width:700px){.nav-account{gap:5px}.nav-account .notification-trigger{font-size:9px;padding:8px}.notification-panel{right:-105px}.nav-account>span{display:none}}
+
+
+/* Social network experience */
+.social-main-nav{display:flex;align-items:center;gap:22px}
+.social-main-nav a{font-size:13px;font-weight:600;color:var(--ink,#10283a);text-decoration:none}
+.social-shell{max-width:1200px;margin:0 auto;padding-top:54px}
+.social-topline{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+.social-topline h2{font-size:30px;margin:8px 0}.social-topline p{margin:0;color:#71818a}
+.social-layout{display:grid;grid-template-columns:190px minmax(0,1fr) 190px;gap:22px;align-items:start}
+.social-sidebar,.social-right-card,.post-composer,.feed-post{background:#fff;border:1px solid #dce7e3;border-radius:5px}
+.social-sidebar{padding:18px;display:flex;flex-direction:column;gap:14px;position:sticky;top:90px}
+.social-sidebar a,.social-sidebar button,.social-right-card a{color:#176f72;text-decoration:none;font-size:13px;text-align:left;background:none;border:0;padding:5px 0;cursor:pointer}
+.social-user-card{display:flex;flex-direction:column;gap:6px;padding-bottom:14px;border-bottom:1px solid #e2eae6}
+.social-user-card small,.social-right-card small{color:#77858a}
+.social-avatar{width:42px;height:42px;border-radius:50%;background:#e4f2ed;color:#2d8984;display:grid;place-items:center;font-size:18px;font-weight:600;flex:none}
+.social-main-column{display:flex;flex-direction:column;gap:16px;min-width:0}
+.post-composer,.feed-post{padding:18px}
+.composer-head,.feed-post-head{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.post-composer textarea{width:100%;resize:vertical;border:1px solid #dce7e3;padding:13px;font:inherit;min-height:86px}
+.composer-footer{display:flex;justify-content:space-between;align-items:center;margin-top:12px}.composer-footer small{color:#7a898d}
+.feed-post-head>div:last-child{display:flex;flex-direction:column;gap:4px}.feed-post-head small{color:#7c8b90;font-size:12px}
+.feed-post-content{white-space:pre-wrap;line-height:1.65;margin:14px 0 18px}
+.feed-post-actions{display:flex;gap:20px;border-top:1px solid #e6eeea;border-bottom:1px solid #e6eeea;padding:12px 0;color:#687c80;font-size:13px}
+.feed-post-actions button,.comment-compose button{background:none;border:0;color:#176f72;font:inherit;cursor:pointer}
+.feed-comments{display:flex;flex-direction:column;gap:9px;padding:12px 0}.feed-comment{font-size:13px;display:flex;gap:8px;line-height:1.5}.feed-comment strong{white-space:nowrap}
+.comment-compose{display:flex;gap:8px}.comment-compose input{flex:1;min-width:0;border:1px solid #dce7e3;padding:10px}
+.social-right-card{padding:18px;display:flex;flex-direction:column;gap:14px}.social-right-card>div{display:flex;justify-content:space-between;align-items:center}.social-right-card b{font-size:24px;color:#176f72}
+.social-empty{padding:30px;text-align:center;background:#f1f7f4;color:#708187}
+.social-network-section{max-width:1200px;margin:0 auto}.network-stats{display:flex;gap:24px;align-items:center;padding:18px;background:#f1f7f4}.network-stats b{font-size:22px;color:#176f72;margin-right:6px}
+@media(max-width:900px){.social-layout{grid-template-columns:1fr}.social-sidebar{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.social-user-card{grid-column:1/-1}.social-right-card{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.social-main-nav{gap:10px}.social-main-nav a{font-size:11px}}
+@media(max-width:600px){.social-main-nav{overflow-x:auto;max-width:48vw}.social-layout{gap:12px}.social-sidebar{grid-template-columns:1fr 1fr}.social-shell{padding:30px 14px}.social-topline h2{font-size:25px}}
