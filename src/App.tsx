@@ -429,7 +429,7 @@ export default function App() {
       }
       const updatedProfile = { ...profile }
       setDirectory(old => old.map(person => person.id === session.user.id ? { ...person, ...updatedProfile, specialties: specialties.filter(item => selectedSpecialties.includes(item.id)).map(item => item.name_tr) } : person))
-      setSelectedProfessional(old => old?.id === session.user.id ? { ...old, ...updatedProfile } : old)
+      setSelectedProfessional((old: any | null) => old?.id === session.user.id ? { ...old, ...updatedProfile } : old)
       await loadDirectory()
       setProfileMessage('Profilin ve uzmanlık alanların kaydedildi. Değişiklikler keşfet bölümüne yansıtıldı.')
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profil kaydedilemedi.') }
