@@ -60,6 +60,7 @@ export default function App() {
       ])
       if (linksError) throw linksError
       if (specialtiesError) throw specialtiesError
+      setSpecialties(allSpecialties || [])
       const names = new Map((allSpecialties || []).map((s:any) => [s.id, s.name_tr]))
       const byUser = new Map<string,string[]>()
       for (const link of links || []) {
