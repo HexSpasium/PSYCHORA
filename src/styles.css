@@ -285,3 +285,12 @@ button{transition:background-color .18s,border-color .18s,color .18s}
 @media(max-width:520px){.social-main-nav{justify-content:flex-start}.social-main-nav button{font-size:10px;padding:8px 10px}}
 :root[data-theme="dark"] .social-main-nav button{color:#dce6eb}
 :root[data-theme="dark"] .social-main-nav button.active{background:#1e3938;color:#8dd8c6}
+
+
+/* Member avatars in the social feed */
+.feed-person-avatar{display:block;object-fit:cover;flex:0 0 auto;border-radius:50%;overflow:hidden}
+.feed-comment{display:flex;align-items:flex-start;gap:10px}
+.feed-comment-avatar{display:block;width:32px;height:32px;min-width:32px;object-fit:cover;flex:0 0 32px;border-radius:50%;overflow:hidden}
+.feed-comment-body{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.feed-comment-body strong{display:block}
+.feed-comment-body span{overflow-wrap:anywhere}
