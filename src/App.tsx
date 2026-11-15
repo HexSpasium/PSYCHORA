@@ -183,7 +183,7 @@ export default function App() {
         void loadIncomingRequests()
       })
       .subscribe()
-    const refresh = window.setInterval(() => void loadIncomingRequests(), 30000)
+    const refresh = window.setInterval(() => { void loadIncomingRequests(); void loadUnreadMessages() }, 30000)
     return () => {
       window.clearInterval(refresh)
       void supabase.removeChannel(channel)
