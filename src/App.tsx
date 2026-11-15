@@ -244,7 +244,7 @@ export default function App() {
             <label>Başvuru notu<textarea rows={3} value={verificationNote} onChange={e=>setVerificationNote(e.target.value)} placeholder="İnceleme ekibine not (isteğe bağlı)"/></label>
             <button className="auth-submit" type="submit" disabled={profileBusy}>Güvenli şekilde gönder</button>
             <small className="auth-note">Belgeler özel depolama alanında tutulur; yalnızca hesabın ve yetkili doğrulama yöneticileri erişebilir.</small>
-          </form></div>
+          </form>}</div>
           {isAdmin && <section className="admin-verification">
             <h3>Yönetici doğrulama paneli</h3>
             <button type="button" className="auth-submit" onClick={loadAdminRequests} disabled={adminBusy}>{adminBusy ? 'Yükleniyor…' : 'Başvuruları getir'}</button>
