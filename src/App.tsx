@@ -61,7 +61,7 @@ export default function App() {
     try {
       const { data: profiles, error: profileError } = await supabase
         .from('profiles')
-        .select('id,display_name,professional_title,bio,verification_status')
+        .select('id,display_name,professional_title,bio,verification_status,avatar_url')
         .eq('profile_visibility', 'public')
         .order('display_name')
         .limit(500)
@@ -99,6 +99,10 @@ export default function App() {
   const [postBusy, setPostBusy] = useState(false)
   const [commentDrafts, setCommentDrafts] = useState<Record<string,string>>({})
   const [followStats, setFollowStats] = useState({ followers: 0, following: 0 })
+  const [myFollowRows, setMyFollowRows] = useState<any[]>([])
+  const [selectedIsFollowing, setSelectedIsFollowing] = useState(false)
+  const [selectedFollowStats, setSelectedFollowStats] = useState({ followers: 0, following: 0 })
+  const [followBusy, setFollowBusy] = useState(false)
   const [feedLive, setFeedLive] = useState(false)
 
   const loadFeed = async () => {
@@ -130,6 +134,7 @@ export default function App() {
       if (commentAuthorsError) throw commentAuthorsError
       const authorMap = new Map([...(authors || []), ...(commentAuthors || [])].map((p:any)=>[p.id,p]))
       setFeedPosts((posts || []).map((p:any)=>({...p, author:authorMap.get(p.author_id), media:(media || []).filter((m:any)=>m.post_id===p.id).map((m:any)=>({...m,url:supabase.storage.from('social-media').getPublicUrl(m.storage_path).data.publicUrl})), reactions:(reactions || []).filter((r:any)=>r.post_id===p.id), comments:(comments || []).filter((c:any)=>c.post_id===p.id).map((c:any)=>({...c,author:authorMap.get(c.author_id)}))})))
+      setMyFollowRows(follows || [])
       setFollowStats({
         followers:(follows || []).filter((f:any)=>f.following_id===session.user.id).length,
         following:(follows || []).filter((f:any)=>f.follower_id===session.user.id).length,
@@ -371,6 +376,37 @@ export default function App() {
     }
   }
 
+  const loadFollowState = async (personId: string) => {
+    if (!session?.user?.id || !personId || personId === session.user.id) return
+    const [{ data: mine, error: mineError }, { data: incoming, error: incomingError }, { data: outgoing, error: outgoingError }] = await Promise.all([
+      supabase.from('follows').select('follower_id,following_id').eq('follower_id', session.user.id).eq('following_id', personId).limit(1),
+      supabase.from('follows').select('follower_id').eq('following_id', personId),
+      supabase.from('follows').select('following_id').eq('follower_id', personId),
+    ])
+    if (mineError || incomingError || outgoingError) {
+      setConnectionError((mineError || incomingError || outgoingError)?.message || 'Takip bilgisi yüklenemedi.')
+      return
+    }
+    setSelectedIsFollowing(!!mine?.length)
+    setSelectedFollowStats({ followers: incoming?.length || 0, following: outgoing?.length || 0 })
+  }
+
+  const toggleFollow = async () => {
+    if (!session?.user?.id || !selectedProfessional?.id || selectedProfessional.id === session.user.id || followBusy) return
+    setFollowBusy(true)
+    setConnectionError('')
+    const result = selectedIsFollowing
+      ? await supabase.from('follows').delete().eq('follower_id', session.user.id).eq('following_id', selectedProfessional.id)
+      : await supabase.from('follows').insert({ follower_id: session.user.id, following_id: selectedProfessional.id })
+    if (result.error) setConnectionError(result.error.message)
+    else {
+      setSelectedIsFollowing(!selectedIsFollowing)
+      setSelectedFollowStats(old => ({ ...old, followers: old.followers + (selectedIsFollowing ? -1 : 1) }))
+      await loadFeed()
+    }
+    setFollowBusy(false)
+  }
+
   const loadConnection = async (person: any) => {
     if (!session?.user || !person?.id || person.id === session.user.id) return
     setConnectionBusy(true); setConnectionError('')
@@ -382,6 +418,7 @@ export default function App() {
       if (error) throw error
       const request = data?.[0] || null
       setConnectionRequest(request)
+      await loadFollowState(person.id)
       if (request?.status === 'accepted') await loadThread(person)
       else setThreadMessages([])
     } catch (error) {
@@ -727,7 +764,7 @@ export default function App() {
       })()}
       <button type="button" className="inbox-refresh" onClick={()=>void loadUnreadMessages()}>Mesajları yenile</button>
     </section>}
-    {session && <section id="social-network" className="section social-network-section"><label>YOUR PROFESSIONAL NETWORK</label><h2>Takip ağın</h2><p>Takipçi ve takip ettiklerini profilinden kategori halinde görüntüleyebilirsin.</p><div className="network-stats"><span><b>{followStats.followers}</b> Takipçi</span><span><b>{followStats.following}</b> Takip edilen</span><button type="button" onClick={()=>void loadFeed()}>Ağı yenile</button></div></section>}
+    {session && <section id="social-network" className="section social-network-section"><label>YOUR PROFESSIONAL NETWORK</label><h2>Takip ağın</h2><p>Takipçi ve takip ettiklerini burada yönetebilirsin.</p><div className="network-stats"><span><b>{followStats.followers}</b> Takipçi</span><span><b>{followStats.following}</b> Takip edilen</span><button type="button" onClick={()=>void loadFeed()}>Ağı yenile</button></div><div className="network-lists"><div><h3>Takip ettiklerin</h3>{myFollowRows.filter((row:any)=>row.follower_id===session?.user?.id).length ? myFollowRows.filter((row:any)=>row.follower_id===session?.user?.id).map((row:any)=><button type="button" key={row.following_id} onClick={()=>{const person=directory.find((p:any)=>p.id===row.following_id);if(person){setSelectedProfessional(person);void loadConnection(person)}}}>{directory.find((p:any)=>p.id===row.following_id)?.display_name || "Üye"} <span>Profili aç ↗</span></button>) : <p>Henüz kimseyi takip etmiyorsun.</p>}</div><div><h3>Takipçilerin</h3>{myFollowRows.filter((row:any)=>row.following_id===session?.user?.id).length ? myFollowRows.filter((row:any)=>row.following_id===session?.user?.id).map((row:any)=><button type="button" key={row.follower_id} onClick={()=>{const person=directory.find((p:any)=>p.id===row.follower_id);if(person){setSelectedProfessional(person);void loadConnection(person)}}}>{directory.find((p:any)=>p.id===row.follower_id)?.display_name || "Üye"} <span>Profili aç ↗</span></button>) : <p>Henüz takipçin yok.</p>}</div></div></section>}
     <section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
     <section className="stats"><div><b>81</b><span>Türkiye ili</span></div><div><b>12+</b><span>Uzmanlık kümesi</span></div><div><b>GLOBAL</b><span>Uluslararası mimari</span></div></section>
     <section id="fields" className="section"><label>DISCOVER YOUR FIELD</label><h2>Psikolojinin farklı <em>uzmanlıkları.</em></h2><div className="cards">{SPECIALTY_GROUPS.map(s=><article key={s.id}><small>{s.id.toUpperCase()}</small><h3>{s.name}</h3><p>{s.topics.join(' · ')}</p></article>)}</div></section>
@@ -741,7 +778,7 @@ export default function App() {
           <button type="button" onClick={loadDirectory} disabled={directoryBusy}>{directoryBusy ? 'Yükleniyor…' : 'Yenile'}</button>
         </div>
         {directoryBusy && !directoryLoaded ? <p>Profesyoneller yükleniyor…</p> : filteredDirectory.length ? <div className="directory-grid">{filteredDirectory.map(person=><article className="directory-card directory-card-clickable" key={person.id} role="button" tabIndex={0} onClick={() => { setSelectedProfessional(person); setConnectionRequest(null); setThreadMessages([]); setConnectionError(''); void loadConnection(person) }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedProfessional(person) } }}>
-          <div className="directory-avatar">{(person.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
+          {person.avatar_url ? <img className="directory-avatar" src={person.avatar_url} alt="" /> : <div className="directory-avatar">{(person.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>}
           <div className="directory-person"><h3>{person.display_name || 'İsimsiz profesyonel'} {person.verification_status==='verified' && <span className="verified-mark" title="Mesleki doğrulaması onaylandı">✓ Doğrulandı</span>}</h3>
           <b>{person.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
           {person.bio && <p>{person.bio}</p>}
@@ -764,10 +801,11 @@ export default function App() {
           : <button className="primary" onClick={requestConnection}>Yeniden bağlantı isteği gönder</button>}
         </div>}
         <div className="professional-detail-heading">
-          <div className="directory-avatar professional-detail-avatar">{(selectedProfessional.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
+          {selectedProfessional.avatar_url ? <img className="directory-avatar professional-detail-avatar" src={selectedProfessional.avatar_url} alt="" /> : <div className="directory-avatar professional-detail-avatar">{(selectedProfessional.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>}
           <div><div className="eyebrow">PSYCHORA PROFESSIONAL</div><h2 id="professional-detail-title">{selectedProfessional.display_name || 'İsimsiz profesyonel'}</h2><b>{selectedProfessional.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
           {selectedProfessional.verification_status === 'verified' && <span className="verified-mark">✓ Mesleki doğrulama onaylandı</span>}</div>
         </div>
+        {session?.user && selectedProfessional.id !== session.user.id && <div className="professional-social-actions"><div className="professional-social-stats"><span><b>{selectedFollowStats.followers}</b> Takipçi</span><span><b>{selectedFollowStats.following}</b> Takip</span></div><button type="button" className={selectedIsFollowing ? "follow-button is-following" : "follow-button"} onClick={toggleFollow} disabled={followBusy}>{followBusy ? "İşleniyor…" : selectedIsFollowing ? "✓ Takip ediliyor" : "+ Takip et"}</button></div>}
         <div className="professional-detail-section"><h3>Hakkında</h3><p>{selectedProfessional.bio || 'Bu profesyonel henüz biyografi eklememiş.'}</p></div>
         <div className="professional-detail-section"><h3>Uzmanlık alanları</h3><div className="directory-tags">{(selectedProfessional.specialties || []).length ? selectedProfessional.specialties.map((s:string)=><span key={s}>{s}</span>) : <small>Henüz uzmanlık alanı eklenmemiş.</small>}</div></div>
         <p className="professional-detail-privacy">İletişim bilgileri yalnızca profil sahibi tarafından ayrıca paylaşılır. PSYCHORA, özel hesap bilgilerini herkese açık göstermez.</p>
