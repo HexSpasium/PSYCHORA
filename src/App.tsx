@@ -166,6 +166,8 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'post_media' }, refreshFeed)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'post_reactions' }, refreshFeed)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, refreshFeed)
+      // Refresh avatar/name snapshots when a member updates their profile photo.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, refreshFeed)
       .subscribe((status) => setFeedLive(status === 'SUBSCRIBED'))
     const fallbackRefresh = window.setInterval(refreshFeed, 60000)
     return () => {
