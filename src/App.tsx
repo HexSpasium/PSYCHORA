@@ -28,6 +28,12 @@ export default function App() {
   const [institution, setInstitution] = useState('')
   const [verificationNote, setVerificationNote] = useState('')
   const [verificationStatus, setVerificationStatus] = useState('')
+  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([])
+  const [specialties, setSpecialties] = useState<{id:string;name_tr:string}[]>([])
+  const [credentialFile, setCredentialFile] = useState<File | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [adminRequests, setAdminRequests] = useState<any[]>([])
+  const [adminBusy, setAdminBusy] = useState(false)
 
   const provinces = useMemo(() => TURKIYE_PROVINCES.filter(p => p.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr'))), [query])
 
@@ -101,14 +107,23 @@ export default function App() {
     if (!session?.user) return
     setProfileOpen(true); setProfileBusy(true); setProfileError(''); setProfileMessage('')
     try {
-      const [{ data: p, error: pe }, { data: requests, error: re }] = await Promise.all([
+      const [{ data: p, error: pe }, { data: requests, error: re }, { data: allSpecialties, error: se }, { data: mine, error: me }, { data: roles, error: ae }] = await Promise.all([
         supabase.from('profiles').select('display_name,professional_title,bio,profile_visibility').eq('id', session.user.id).maybeSingle(),
         supabase.from('verification_requests').select('status').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(1),
+        supabase.from('specialties').select('id,name_tr').eq('is_active', true).order('name_tr'),
+        supabase.from('user_specialties').select('specialty_id').eq('user_id', session.user.id),
+        supabase.from('admin_roles').select('role').eq('user_id', session.user.id),
       ])
       if (pe) throw pe
       if (re) throw re
+      if (se) throw se
+      if (me) throw me
+      if (ae) throw ae
       setProfile({ display_name: p?.display_name || String(session.user.user_metadata?.full_name || ''), professional_title: p?.professional_title || '', bio: p?.bio || '', profile_visibility: p?.profile_visibility || 'public' })
       setVerificationStatus(requests?.[0]?.status || '')
+      setSpecialties(allSpecialties || [])
+      setSelectedSpecialties((mine || []).map((x: {specialty_id:string}) => x.specialty_id))
+      setIsAdmin((roles || []).length > 0)
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profil yüklenemedi.') }
     finally { setProfileBusy(false) }
   }
@@ -120,7 +135,13 @@ export default function App() {
     try {
       const { error } = await supabase.from('profiles').update({ ...profile, updated_at: new Date().toISOString() }).eq('id', session.user.id)
       if (error) throw error
-      setProfileMessage('Profil bilgilerin kaydedildi.')
+      const { error: deleteError } = await supabase.from('user_specialties').delete().eq('user_id', session.user.id)
+      if (deleteError) throw deleteError
+      if (selectedSpecialties.length) {
+        const { error: insertError } = await supabase.from('user_specialties').insert(selectedSpecialties.map(specialty_id => ({ user_id: session.user.id, specialty_id })))
+        if (insertError) throw insertError
+      }
+      setProfileMessage('Profilin ve uzmanlık alanların kaydedildi.')
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Profil kaydedilemedi.') }
     finally { setProfileBusy(false) }
   }
@@ -133,14 +154,56 @@ export default function App() {
       const { data: pending, error: checkError } = await supabase.from('verification_requests').select('id').eq('user_id', session.user.id).eq('status', 'pending').limit(1)
       if (checkError) throw checkError
       if (pending?.length) throw new Error('Zaten incelemede olan bir başvurun var.')
-      const { error: credentialError } = await supabase.from('professional_credentials').insert({ user_id: session.user.id, credential_type: credentialType, institution: institution.trim() || null })
-      if (credentialError) throw credentialError
+      if (!credentialFile) throw new Error('Lütfen diploma veya mesleki belgeni seç.')
+      const allowed = ['application/pdf','image/jpeg','image/png']
+      if (!allowed.includes(credentialFile.type)) throw new Error('Yalnızca PDF, JPG veya PNG dosyası yükleyebilirsin.')
+      if (credentialFile.size > 10 * 1024 * 1024) throw new Error('Dosya boyutu en fazla 10 MB olabilir.')
+      const ext = credentialFile.name.split('.').pop()?.toLowerCase() || 'pdf'
+      const objectPath = session.user.id + '/' + crypto.randomUUID() + '.' + ext
+      const { error: uploadError } = await supabase.storage.from('credential-documents').upload(objectPath, credentialFile, { contentType: credentialFile.type, upsert: false })
+      if (uploadError) throw uploadError
+      const { error: credentialError } = await supabase.from('professional_credentials').insert({ user_id: session.user.id, credential_type: credentialType, institution: institution.trim() || null, document_path: objectPath })
+      if (credentialError) {
+        await supabase.storage.from('credential-documents').remove([objectPath])
+        throw credentialError
+      }
       const { error: requestError } = await supabase.from('verification_requests').insert({ user_id: session.user.id, applicant_note: verificationNote.trim() || null })
       if (requestError) throw requestError
       setVerificationStatus('pending')
       setProfileMessage('Doğrulama başvurun alındı. Bu form dosya yüklemez; belge yükleme alanı ayrıca kurulacak.')
     } catch (error) { setProfileError(error instanceof Error ? error.message : 'Başvuru gönderilemedi.') }
     finally { setProfileBusy(false) }
+  }
+
+  const loadAdminRequests = async () => {
+    if (!session?.user || !isAdmin) return
+    setAdminBusy(true)
+    try {
+      const { data, error } = await supabase.from('verification_requests').select('id,user_id,status,applicant_note,created_at,profiles(display_name,professional_title),professional_credentials(credential_type,institution,document_path)').order('created_at', { ascending: false })
+      if (error) throw error
+      setAdminRequests(data || [])
+    } catch (error) { setProfileError(error instanceof Error ? error.message : 'Başvurular yüklenemedi.') }
+    finally { setAdminBusy(false) }
+  }
+
+  const reviewVerification = async (request: any, status: 'approved' | 'rejected') => {
+    if (!session?.user || !isAdmin) return
+    setAdminBusy(true); setProfileError(''); setProfileMessage('')
+    try {
+      const { error: requestError } = await supabase.from('verification_requests').update({ status, reviewed_by: session.user.id, reviewed_at: new Date().toISOString() }).eq('id', request.id)
+      if (requestError) throw requestError
+      const { error: profileErrorUpdate } = await supabase.from('profiles').update({ verification_status: status === 'approved' ? 'verified' : 'unverified', updated_at: new Date().toISOString() }).eq('id', request.user_id)
+      if (profileErrorUpdate) throw profileErrorUpdate
+      setProfileMessage(status === 'approved' ? 'Başvuru onaylandı.' : 'Başvuru reddedildi.')
+      await loadAdminRequests()
+    } catch (error) { setProfileError(error instanceof Error ? error.message : 'İnceleme kaydedilemedi.') }
+    finally { setAdminBusy(false) }
+  }
+
+  const openCredential = async (path: string) => {
+    const { data, error } = await supabase.storage.from('credential-documents').createSignedUrl(path, 60)
+    if (error) { setProfileError(error.message); return }
+    window.open(data.signedUrl, '_blank', 'noopener,noreferrer')
   }
 
   const handleSignOut = async () => {
@@ -169,15 +232,17 @@ export default function App() {
             <label>Mesleki unvan<input value={profile.professional_title} onChange={e=>setProfile({...profile,professional_title:e.target.value})} placeholder="Örn. Klinik Psikolog"/></label>
             <label>Kısa biyografi<textarea rows={4} value={profile.bio} onChange={e=>setProfile({...profile,bio:e.target.value})} placeholder="Mesleki ilgi alanların ve deneyimin"/></label>
             <label>Profil görünürlüğü<select value={profile.profile_visibility} onChange={e=>setProfile({...profile,profile_visibility:e.target.value})}><option value="public">Herkese açık</option><option value="followers">Takipçiler</option><option value="private">Gizli</option></select></label>
+            <div className="profile-specialties"><b>Uzmanlık alanları</b><div className="profile-specialty-list">{specialties.map(s=><label key={s.id}><input type="checkbox" checked={selectedSpecialties.includes(s.id)} onChange={e=>setSelectedSpecialties(old=>e.target.checked?[...old,s.id]:old.filter(id=>id!==s.id))}/>{s.name_tr}</label>)}</div></div>
             <button className="auth-submit" type="submit" disabled={profileBusy}>Profili kaydet</button>
           </form>
           <div className="verification-box"><h3>Mesleki kimlik doğrulaması</h3><p>Başvuru durumu: <strong>{verificationStatus==='pending'?'İncelemede':verificationStatus==='approved'?'Onaylandı':verificationStatus==='rejected'?'Reddedildi':verificationStatus==='resubmission'?'Yeniden başvuru gerekli':'Başvuru yok'}</strong></p>
           {verificationStatus!=='pending' && verificationStatus!=='approved' && <form onSubmit={submitVerification}>
             <label>Belge türü<select value={credentialType} onChange={e=>setCredentialType(e.target.value)}><option value="diploma">Diploma</option><option value="license">Mesleki ruhsat / yetki belgesi</option><option value="student_certificate">Öğrenci belgesi</option><option value="other">Diğer</option></select></label>
             <label>Üniversite / kurum<input value={institution} onChange={e=>setInstitution(e.target.value)} placeholder="Kurum adı"/></label>
+            <label>Belge dosyası (PDF, JPG veya PNG · en fazla 10 MB)<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={e=>setCredentialFile(e.target.files?.[0] || null)} required/></label>
             <label>Başvuru notu<textarea rows={3} value={verificationNote} onChange={e=>setVerificationNote(e.target.value)} placeholder="İnceleme ekibine not (isteğe bağlı)"/></label>
-            <button className="auth-submit" type="submit" disabled={profileBusy}>Doğrulama başvurusu gönder</button>
-            <small className="auth-note">Bu form belge dosyası yüklemez. Hassas belgelerini herkese açık bağlantıyla paylaşma; güvenli yükleme alanı ayrıca kurulacak.</small>
+            <button className="auth-submit" type="submit" disabled={profileBusy}>Güvenli şekilde gönder</button>
+            <small className="auth-note">Belgeler özel depolama alanında tutulur; yalnızca hesabın ve yetkili doğrulama yöneticileri erişebilir.</small>
           </form>}</div>
         </>}
         {profileMessage && <div className="auth-message">{profileMessage}</div>}{profileError && <div className="auth-error">{profileError}</div>}
