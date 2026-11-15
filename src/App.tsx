@@ -111,6 +111,10 @@ export default function App() {
   const [selectedFollowStats, setSelectedFollowStats] = useState({ followers: 0, following: 0 })
   const [followBusy, setFollowBusy] = useState(false)
   const [feedLive, setFeedLive] = useState(false)
+  const [selectedSpecialty, setSelectedSpecialty] = useState<any | null>(null)
+  const [specialtyDiscussionDraft, setSpecialtyDiscussionDraft] = useState('')
+  const [specialtyDiscussionImage, setSpecialtyDiscussionImage] = useState<File | null>(null)
+  const [specialtyDiscussionBusy, setSpecialtyDiscussionBusy] = useState(false)
 
   const loadFeed = async () => {
     if (!session?.user) { setFeedPosts([]); return }
@@ -197,6 +201,29 @@ export default function App() {
       setPostDraft(''); setPostImage(null); await loadFeed()
     }
     setPostBusy(false)
+  }
+
+  const createSpecialtyDiscussion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!session?.user || !selectedSpecialty || !specialtyDiscussionDraft.trim()) return
+    setSpecialtyDiscussionBusy(true)
+    const taggedContent = '🧠 ' + selectedSpecialty.name + ' · ' + specialtyDiscussionDraft.trim()
+    const { data: post, error } = await supabase.from('posts').insert({author_id:session.user.id,content:taggedContent,visibility:'public'}).select('id').single()
+    if (error) setNotificationError(error.message)
+    else {
+      if (specialtyDiscussionImage) {
+        const path = session.user.id + '/posts/' + crypto.randomUUID() + '-' + specialtyDiscussionImage.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+        const { error: uploadError } = await supabase.storage.from('social-media').upload(path,specialtyDiscussionImage,{contentType:specialtyDiscussionImage.type,upsert:false})
+        if (uploadError) setNotificationError('Tartışma açıldı ancak görsel yüklenemedi: ' + uploadError.message)
+        else {
+          const { error: mediaError } = await supabase.from('post_media').insert({post_id:post.id,media_type:'image',storage_path:path,file_name:specialtyDiscussionImage.name,mime_type:specialtyDiscussionImage.type,file_size:specialtyDiscussionImage.size,position:0})
+          if (mediaError) setNotificationError('Görsel kaydedilemedi: ' + mediaError.message)
+        }
+      }
+      setSpecialtyDiscussionDraft(''); setSpecialtyDiscussionImage(null); await loadFeed()
+      setActiveSection('feed')
+    }
+    setSpecialtyDiscussionBusy(false)
   }
 
   const toggleReaction = async (post:any) => {
@@ -797,7 +824,7 @@ export default function App() {
     {session && activeSection === "network" && <section id="social-network" className="section social-network-section"><label>YOUR PROFESSIONAL NETWORK</label><h2>Takip ağın</h2><p>Takipçi ve takip ettiklerini burada yönetebilirsin.</p><div className="network-stats"><span><b>{followStats.followers}</b> Takipçi</span><span><b>{followStats.following}</b> Takip edilen</span><button type="button" onClick={()=>void loadFeed()}>Ağı yenile</button></div><div className="network-lists"><div><h3>Takip ettiklerin</h3>{myFollowRows.filter((row:any)=>row.follower_id===session?.user?.id).length ? myFollowRows.filter((row:any)=>row.follower_id===session?.user?.id).map((row:any)=><button type="button" key={row.following_id} onClick={()=>{const person=directory.find((p:any)=>p.id===row.following_id);if(person){setSelectedProfessional(person);void loadConnection(person)}}}>{directory.find((p:any)=>p.id===row.following_id)?.display_name || "Üye"} <span>Profili aç ↗</span></button>) : <p>Henüz kimseyi takip etmiyorsun.</p>}</div><div><h3>Takipçilerin</h3>{myFollowRows.filter((row:any)=>row.following_id===session?.user?.id).length ? myFollowRows.filter((row:any)=>row.following_id===session?.user?.id).map((row:any)=><button type="button" key={row.follower_id} onClick={()=>{const person=directory.find((p:any)=>p.id===row.follower_id);if(person){setSelectedProfessional(person);void loadConnection(person)}}}>{directory.find((p:any)=>p.id===row.follower_id)?.display_name || "Üye"} <span>Profili aç ↗</span></button>) : <p>Henüz takipçin yok.</p>}</div></div></section>}
     {(!session || activeSection === "fields") && <><section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
     <section className="stats"><div><b>81</b><span>Türkiye ili</span></div><div><b>12+</b><span>Uzmanlık kümesi</span></div><div><b>GLOBAL</b><span>Uluslararası mimari</span></div></section></>}
-    {(!session || activeSection === "fields") && <section id="fields" className="section"><label>DISCOVER YOUR FIELD</label><h2>Psikolojinin farklı <em>uzmanlıkları.</em></h2><div className="cards">{SPECIALTY_GROUPS.map(s=><article key={s.id}><small>{s.id.toUpperCase()}</small><h3>{s.name}</h3><p>{s.topics.join(' · ')}</p></article>)}</div></section>}
+    {(!session || activeSection === "fields") && <section id="fields" className="section specialty-hub"><label>DISCOVER YOUR FIELD</label><h2>Psikolojinin farklı <em>uzmanlıkları.</em></h2><p className="specialty-intro">Bir uzmanlık alanını seç; alanı tanı, bu alanda çalışan meslektaşlarını keşfet ve bilimsel topluluğa katıl.</p><div className="cards specialty-cards">{SPECIALTY_GROUPS.map(s=><article key={s.id} className={selectedSpecialty?.id===s.id?'specialty-card selected':''}><small>{s.id.toUpperCase()}</small><h3>{s.name}</h3><p>{s.topics.join(' · ')}</p><button type="button" className="primary specialty-open" onClick={()=>{setSelectedSpecialty(s);setActiveSection('fields');window.scrollTo({top:0,behavior:'smooth'});if(session?.user)void loadDirectory()}}>Alanı incele ↗</button></article>)}</div>{selectedSpecialty && <section className="specialty-detail" aria-label={selectedSpecialty.name}><button type="button" className="secondary specialty-back" onClick={()=>setSelectedSpecialty(null)}>← Tüm branşlar</button><label>UZMANLIK ALANI</label><h2>{selectedSpecialty.name}</h2><div className="specialty-detail-grid"><article><h3>İncele</h3><p><strong>{selectedSpecialty.name}</strong>; {selectedSpecialty.topics.join(', ')} gibi konulara odaklanan bir psikoloji uzmanlık alanıdır. Bu alanın kapsamı; değerlendirme, bilimsel araştırma, önleme ve uygun mesleki uygulamalar çerçevesinde ele alınır. Uygulama sınırları kişinin eğitimine, yetkinliğine ve ilgili mevzuata göre değişir.</p><h4>Başlıca çalışma konuları</h4><div className="directory-tags">{selectedSpecialty.topics.map((topic:string)=><span key={topic}>{topic}</span>)}</div><p className="specialty-note">Bu açıklama genel bilgilendirme amaçlıdır; tanı veya kişiye özel klinik öneri değildir.</p></article><article><h3>Alanla bağlantılı psikologlar</h3>{!session ? <p>Bu alandaki üyeleri görmek için giriş yapmalısın.</p> : <div className="specialty-members">{directory.filter((person:any)=>(person.specialties||[]).some((item:string)=>item.toLocaleLowerCase('tr')===selectedSpecialty.name.toLocaleLowerCase('tr')||item.toLocaleLowerCase('tr').includes(selectedSpecialty.name.toLocaleLowerCase('tr')))).map((person:any)=><button type="button" key={person.id} onClick={()=>{setSelectedProfessional(person);void loadConnection(person)}}>{person.avatar_url?<img src={person.avatar_url} alt="" />:<span className="social-avatar">{(person.display_name||'P').charAt(0)}</span>}<span><b>{person.display_name}</b><small>{person.professional_title||'Psikoloji profesyoneli'}</small></span></button>)}{!directory.some((person:any)=>(person.specialties||[]).some((item:string)=>item.toLocaleLowerCase('tr')===selectedSpecialty.name.toLocaleLowerCase('tr')||item.toLocaleLowerCase('tr').includes(selectedSpecialty.name.toLocaleLowerCase('tr'))))&&<p>Bu branşla eşleşen herkese açık üye profili henüz bulunamadı.</p>}</div>}</article></div><article className="specialty-discussion"><h3>Toplulukta tartışma yarat</h3><p>Bu branşla ilgili bir soru, vaka dışı mesleki görüş veya bilimsel tartışma başlat. Diğer üyeler akışta yorum yapabilir.</p>{session ? <form onSubmit={createSpecialtyDiscussion}><textarea value={specialtyDiscussionDraft} onChange={e=>setSpecialtyDiscussionDraft(e.target.value)} rows={4} maxLength={20000} placeholder={selectedSpecialty.name+' hakkında topluluğa ne sormak veya tartışmak istersin?'} required/><div className="specialty-discussion-tools"><div className="specialty-emojis">{['😊','🧠','💬','🤔','👏','❤️','📚','🔍'].map(emoji=><button type="button" key={emoji} onClick={()=>setSpecialtyDiscussionDraft(value=>value+emoji)}>{emoji}</button>)}</div><label className="post-image-picker">＋ Görsel ekle<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setSpecialtyDiscussionImage(e.target.files?.[0]||null)}/></label><small>{specialtyDiscussionImage?.name||'İsteğe bağlı görsel'}</small><button className="primary" disabled={specialtyDiscussionBusy||!specialtyDiscussionDraft.trim()}>{specialtyDiscussionBusy?'Yayınlanıyor…':'Tartışmayı yayınla'}</button></div></form> : <div className="directory-gate"><span>Tartışma başlatmak ve yorum yapmak için giriş yap.</span><button className="primary" onClick={()=>openAuth('login')}>Giriş yap</button></div>}</article></section>}</section>}
     {(!session || activeSection === "discover") && <section id="professionals" className="section directory">
       <label>PSYCHORA PROFESSIONAL DIRECTORY</label><h2>Uzmanını bul, <em>bağlantı kur.</em></h2>
       <p>Herkese açık profesyonel profilleri uzmanlık alanlarına göre keşfet.</p>
