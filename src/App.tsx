@@ -41,6 +41,12 @@ export default function App() {
   const [directorySearch, setDirectorySearch] = useState('')
   const [directorySpecialty, setDirectorySpecialty] = useState('')
   const [selectedProfessional, setSelectedProfessional] = useState<any | null>(null)
+  const [connectionRequest, setConnectionRequest] = useState<any | null>(null)
+  const [connectionBusy, setConnectionBusy] = useState(false)
+  const [connectionError, setConnectionError] = useState('')
+  const [threadMessages, setThreadMessages] = useState<any[]>([])
+  const [messageDraft, setMessageDraft] = useState('')
+  const [messageBusy, setMessageBusy] = useState(false)
 
   const loadDirectory = async () => {
     if (!session?.user) return
@@ -104,6 +110,81 @@ export default function App() {
     if (session?.user) void loadDirectory()
     else { setDirectory([]); setDirectoryLoaded(false) }
   }, [session?.user?.id])
+
+  const loadConnection = async (person: any) => {
+    if (!session?.user || !person?.id || person.id === session.user.id) return
+    setConnectionBusy(true); setConnectionError('')
+    try {
+      const me = session.user.id
+      const { data, error } = await supabase.from('connection_requests').select('*')
+        .or(`and(requester_id.eq.${me},recipient_id.eq.${person.id}),and(requester_id.eq.${person.id},recipient_id.eq.${me})`)
+        .order('created_at', { ascending: false }).limit(1)
+      if (error) throw error
+      const request = data?.[0] || null
+      setConnectionRequest(request)
+      if (request?.status === 'accepted') await loadThread(person)
+      else setThreadMessages([])
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : 'Bağlantı bilgisi yüklenemedi.')
+    } finally { setConnectionBusy(false) }
+  }
+
+  const loadThread = async (person = selectedProfessional) => {
+    if (!session?.user || !person?.id) return
+    const me = session.user.id
+    const { data, error } = await supabase.from('direct_messages').select('id,sender_id,recipient_id,content,read_at,created_at')
+      .or(`and(sender_id.eq.${me},recipient_id.eq.${person.id}),and(sender_id.eq.${person.id},recipient_id.eq.${me})`)
+      .order('created_at', { ascending: true }).limit(200)
+    if (error) throw error
+    setThreadMessages(data || [])
+    const unread = (data || []).filter((m:any) => m.recipient_id === me && !m.read_at).map((m:any) => m.id)
+    if (unread.length) {
+      const { error: readError } = await supabase.from('direct_messages').update({ read_at: new Date().toISOString() }).in('id', unread)
+      if (readError) console.warn('Read receipt update failed', readError)
+    }
+  }
+
+  const requestConnection = async () => {
+    if (!session?.user || !selectedProfessional?.id) return
+    setConnectionBusy(true); setConnectionError('')
+    const { data, error } = await supabase.from('connection_requests').insert({
+      requester_id: session.user.id, recipient_id: selectedProfessional.id,
+    }).select().single()
+    if (error) setConnectionError(error.message)
+    else setConnectionRequest(data)
+    setConnectionBusy(false)
+  }
+
+  const respondConnection = async (status: 'accepted' | 'rejected') => {
+    if (!connectionRequest) return
+    setConnectionBusy(true); setConnectionError('')
+    const { data, error } = await supabase.from('connection_requests').update({ status, updated_at: new Date().toISOString() })
+      .eq('id', connectionRequest.id).select().single()
+    if (error) setConnectionError(error.message)
+    else {
+      setConnectionRequest(data)
+      if (status === 'accepted') {
+        try { await loadThread(selectedProfessional) } catch (e) { setConnectionError(e instanceof Error ? e.message : 'Mesajlar yüklenemedi.') }
+      } else setThreadMessages([])
+    }
+    setConnectionBusy(false)
+  }
+
+  const sendDirectMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const content = messageDraft.trim()
+    if (!content || !session?.user || !selectedProfessional?.id) return
+    setMessageBusy(true); setConnectionError('')
+    const { error } = await supabase.from('direct_messages').insert({
+      sender_id: session.user.id, recipient_id: selectedProfessional.id, content,
+    })
+    if (error) setConnectionError(error.message)
+    else {
+      setMessageDraft('')
+      try { await loadThread(selectedProfessional) } catch (e) { setConnectionError(e instanceof Error ? e.message : 'Mesaj gönderildi ancak konuşma yenilenemedi.') }
+    }
+    setMessageBusy(false)
+  }
 
   const openAuth = (mode: AuthMode) => {
     setAuthMode(mode)
@@ -359,12 +440,12 @@ export default function App() {
           <select value={directorySpecialty} onChange={e=>setDirectorySpecialty(e.target.value)}><option value="">Tüm uzmanlık alanları</option>{specialties.length ? specialties.map(s=><option key={s.id} value={s.name_tr}>{s.name_tr}</option>) : [...new Set(directory.flatMap(p=>p.specialties))].sort().map(s=><option key={s} value={s}>{s}</option>)}</select>
           <button type="button" onClick={loadDirectory} disabled={directoryBusy}>{directoryBusy ? 'Yükleniyor…' : 'Yenile'}</button>
         </div>
-        {directoryBusy && !directoryLoaded ? <p>Profesyoneller yükleniyor…</p> : filteredDirectory.length ? <div className="directory-grid">{filteredDirectory.map(person=><article className="directory-card directory-card-clickable" key={person.id} role="button" tabIndex={0} onClick={() => setSelectedProfessional(person)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedProfessional(person) } }}>
+        {directoryBusy && !directoryLoaded ? <p>Profesyoneller yükleniyor…</p> : filteredDirectory.length ? <div className="directory-grid">{filteredDirectory.map(person=><article className="directory-card directory-card-clickable" key={person.id} role="button" tabIndex={0} onClick={() => { setSelectedProfessional(person); setConnectionRequest(null); setThreadMessages([]); setConnectionError(''); void loadConnection(person) }} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedProfessional(person) } }}>
           <div className="directory-avatar">{(person.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
           <div className="directory-person"><h3>{person.display_name || 'İsimsiz profesyonel'} {person.verification_status==='verified' && <span className="verified-mark" title="Mesleki doğrulaması onaylandı">✓ Doğrulandı</span>}</h3>
           <b>{person.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
           {person.bio && <p>{person.bio}</p>}
-          <div className="directory-tags">{person.specialties.map((s:string)=><span key={s}>{s}</span>)}</div><button className="profile-detail-link" type="button" onClick={e=>{e.stopPropagation();setSelectedProfessional(person)}}>Profili görüntüle ↗</button></div>
+          <div className="directory-tags">{person.specialties.map((s:string)=><span key={s}>{s}</span>)}</div><button className="profile-detail-link" type="button" onClick={e=>{e.stopPropagation();setSelectedProfessional(person); setConnectionRequest(null); setThreadMessages([]); setConnectionError(''); void loadConnection(person)}}>Profili görüntüle ↗</button></div>
         </article>)}</div> : <p>{directoryLoaded ? 'Aramana uygun herkese açık profesyonel profili bulunamadı.' : 'Profesyonel profiller şu anda yüklenemedi. Yenile butonunu kullanabilirsin.'}</p>}
       </>}
     </section>
@@ -375,6 +456,13 @@ export default function App() {
     {selectedProfessional && <div className="auth-backdrop professional-detail-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setSelectedProfessional(null) }}>
       <section className="professional-detail" role="dialog" aria-modal="true" aria-labelledby="professional-detail-title">
         <button className="auth-close" aria-label="Kapat" onClick={() => setSelectedProfessional(null)}>×</button>
+        {session?.user && selectedProfessional.id !== session.user.id && <div className="professional-contact-actions">
+          {connectionBusy ? <p>Bağlantı durumu kontrol ediliyor…</p> : !connectionRequest ? <button className="primary" onClick={requestConnection}>Bağlantı isteği gönder</button>
+          : connectionRequest.status === 'pending' && connectionRequest.recipient_id === session.user.id ? <div className="connection-request-actions"><span>Bu profesyonel seninle bağlantı kurmak istiyor.</span><button className="primary" disabled={connectionBusy} onClick={() => respondConnection('accepted')}>Kabul et</button><button className="secondary" disabled={connectionBusy} onClick={() => respondConnection('rejected')}>Reddet</button></div>
+          : connectionRequest.status === 'pending' ? <span className="connection-status">Bağlantı isteğin gönderildi · Yanıt bekleniyor</span>
+          : connectionRequest.status === 'accepted' ? <span className="connection-status connected">✓ Bağlantınız var</span>
+          : <button className="primary" onClick={requestConnection}>Yeniden bağlantı isteği gönder</button>}
+        </div>}
         <div className="professional-detail-heading">
           <div className="directory-avatar professional-detail-avatar">{(selectedProfessional.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
           <div><div className="eyebrow">PSYCHORA PROFESSIONAL</div><h2 id="professional-detail-title">{selectedProfessional.display_name || 'İsimsiz profesyonel'}</h2><b>{selectedProfessional.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
@@ -383,6 +471,12 @@ export default function App() {
         <div className="professional-detail-section"><h3>Hakkında</h3><p>{selectedProfessional.bio || 'Bu profesyonel henüz biyografi eklememiş.'}</p></div>
         <div className="professional-detail-section"><h3>Uzmanlık alanları</h3><div className="directory-tags">{(selectedProfessional.specialties || []).length ? selectedProfessional.specialties.map((s:string)=><span key={s}>{s}</span>) : <small>Henüz uzmanlık alanı eklenmemiş.</small>}</div></div>
         <p className="professional-detail-privacy">İletişim bilgileri yalnızca profil sahibi tarafından ayrıca paylaşılır. PSYCHORA, özel hesap bilgilerini herkese açık göstermez.</p>
+        {session?.user && selectedProfessional.id !== session.user.id && connectionRequest?.status === 'accepted' && <div className="professional-messaging">
+          <div className="messaging-heading"><h3>Mesajlaşma</h3><button type="button" className="secondary" onClick={() => loadThread().catch(e=>setConnectionError(e.message))}>Yenile</button></div>
+          <div className="message-list">{threadMessages.length ? threadMessages.map((m:any)=><div key={m.id} className={m.sender_id === session.user.id ? 'message-bubble mine' : 'message-bubble'}><p>{m.content}</p><time>{new Date(m.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time></div>) : <p className="message-empty">Henüz mesaj yok. İlk mesajı sen gönder.</p>}</div>
+          <form className="message-compose" onSubmit={sendDirectMessage}><textarea value={messageDraft} onChange={e=>setMessageDraft(e.target.value)} maxLength={5000} rows={3} placeholder="Mesajını yaz…" required/><button className="primary" disabled={messageBusy || !messageDraft.trim()}>{messageBusy ? 'Gönderiliyor…' : 'Gönder'}</button></form>
+        </div>}
+        {connectionError && <p className="auth-error" role="alert">{connectionError}</p>}
       </section>
     </div>}
 
