@@ -312,7 +312,7 @@ export default function App() {
       .select('id,sender_id,recipient_id,content,read_at,created_at')
       .eq('recipient_id', session.user.id)
       .order('created_at', { ascending: false })
-      .limit(200)
+      .limit(1000)
     if (error) { setNotificationError(error.message); return }
     const senderIds = [...new Set((messages || []).map((item: any) => item.sender_id))]
     const { data: profiles, error: profilesError } = senderIds.length
