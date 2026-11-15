@@ -815,9 +815,8 @@ export default function App() {
       </>}
     </section>}
     {(!session || activeSection === "fields") && <section id="turkiye" className="section location"><label>TÜRKİYE FIRST · GLOBAL BY DESIGN</label><h2>81 ilden, <em>dünyaya açılan ağ.</em></h2><p>İlk odağımız Türkiye'nin 81 ili. Altyapı farklı ülkeler ve bölgelere genişleyebilecek şekilde tasarlanıyor.</p><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Şehir ara..."/><div className="cities">{provinces.map(p=><button className={city===p?'chosen':''} key={p} onClick={()=>setCity(p)}>{p}</button>)}</div>{city && <p className="chosen-text">Seçilen şehir: {city}</p>}</section>
-    {(!session || activeSection === "fields") && <section id="about" className="section about"><label>ONE PROFESSION. ONE NETWORK.</label><h2>Mesleki dünyanın ortak zemini.</h2><p>PSYCHORA; psikoloji profesyonellerini bilimsel paylaşım, mesleki bağlantı ve profesyonel gelişim için bir araya getirmeyi amaçlar.</p>{!session && <button className="primary" onClick={() => openAuth('signup')}>PSYCHORA'ya katıl ↗</button>}</section>
-    <footer>© {new Date().getFullYear()} PSYCHORA · Türkiye'den dünyaya.</footer>
-
+    {(!session || activeSection === "fields") && {(!session || activeSection === "fields") && <section id="about" className="section about"><label>ONE PROFESSION. ONE NETWORK.</label><h2>Mesleki dünyanın ortak zemini.</h2><p>PSYCHORA; psikoloji profesyonellerini bilimsel paylaşım, mesleki bağlantı ve profesyonel gelişim için bir araya getirmeyi amaçlar.</p>{!session && <button className="primary" onClick={() => openAuth('signup')}>PSYCHORA'ya katıl ↗</button>}</section>
+    </section>}
     {(!session || activeSection === "fields") && <footer>© {new Date().getFullYear()} PSYCHORA · Türkiye’den dünyaya.</footer>}
 
     {selectedProfessional && <div className="auth-backdrop professional-detail-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setSelectedProfessional(null) }}>
