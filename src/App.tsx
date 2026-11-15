@@ -185,6 +185,37 @@ export default function App() {
     finally { setProfileBusy(false) }
   }
 
+  const uploadSupplementalCredential = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!session?.user || verificationStatus !== 'approved') return
+    setProfileBusy(true); setProfileError(''); setProfileMessage('')
+    let uploadedPath = ''
+    try {
+      if (!credentialFile) throw new Error('Lütfen eklemek istediğin belgeyi seç.')
+      const allowed = ['application/pdf','image/jpeg','image/png']
+      if (!allowed.includes(credentialFile.type)) throw new Error('Yalnızca PDF, JPG veya PNG dosyası yükleyebilirsin.')
+      if (credentialFile.size > 10 * 1024 * 1024) throw new Error('Dosya boyutu en fazla 10 MB olabilir.')
+      const ext = credentialFile.name.split('.').pop()?.toLowerCase() || 'pdf'
+      uploadedPath = session.user.id + '/' + crypto.randomUUID() + '.' + ext
+      const { error: uploadError } = await supabase.storage.from('credential-documents').upload(uploadedPath, credentialFile, { contentType: credentialFile.type, upsert: false })
+      if (uploadError) throw uploadError
+      const { data: saved, error: saveError } = await supabase.from('professional_credentials').insert({
+        user_id: session.user.id,
+        credential_type: credentialType,
+        institution: institution.trim() || null,
+        document_path: uploadedPath,
+      }).select('id,credential_type,institution,document_path,created_at').single()
+      if (saveError) throw saveError
+      setMyCredentials(old => [saved, ...old])
+      setCredentialFile(null)
+      setInstitution('')
+      setProfileMessage('Belgen güvenli depoya eklendi. Mevcut doğrulama onayın korunuyor.')
+    } catch (error) {
+      if (uploadedPath) await supabase.storage.from('credential-documents').remove([uploadedPath])
+      setProfileError(error instanceof Error ? error.message : 'Belge eklenemedi.')
+    } finally { setProfileBusy(false) }
+  }
+
   const loadAdminRequests = async () => {
     if (!session?.user || !isAdmin) return
     setAdminBusy(true); setProfileError(''); setProfileMessage('')
@@ -285,6 +316,13 @@ export default function App() {
           </form>
           <div className="verification-box"><h3>Mesleki kimlik doğrulaması</h3><p>Başvuru durumu: <strong>{verificationStatus==='pending'?'İncelemede':verificationStatus==='approved'?'Onaylandı':verificationStatus==='rejected'?'Reddedildi':verificationStatus==='resubmission'?'Yeniden başvuru gerekli':'Başvuru yok'}</strong></p>
           <div className="my-credentials"><b>Yüklediğim belgeler</b>{myCredentials.length ? myCredentials.map((item:any)=><div className="my-credential" key={item.id}><span>{item.credential_type} · {item.institution || 'Kurum belirtilmedi'}</span><button type="button" onClick={()=>item.document_path ? openCredential(item.document_path) : setProfileError('Bu eski kayıtta dosya bulunmuyor.')} disabled={!item.document_path}>Görüntüle</button><button type="button" onClick={()=>deleteMyCredential(item)} disabled={profileBusy}>Sil</button></div>) : <small>Henüz belge kaydı yok.</small>}</div>
+          {verificationStatus==='approved' && <div className="auth-note">Bu hesabın eski doğrulama kaydı yönetici tarafından onaylanmış; o kayda belge dosyası eklenmemiş. Onayın korunuyor. İstersen aşağıdan belgeyi hesabına güvenli biçimde ekleyebilirsin.</div>}
+          {verificationStatus==='approved' && <form onSubmit={uploadSupplementalCredential}>
+            <label>Ek belge türü<select value={credentialType} onChange={e=>setCredentialType(e.target.value)}><option value="diploma">Diploma</option><option value="license">Mesleki ruhsat / yetki belgesi</option><option value="student_certificate">Öğrenci belgesi</option><option value="other">Diğer</option></select></label>
+            <label>Üniversite / kurum<input value={institution} onChange={e=>setInstitution(e.target.value)} placeholder="Kurum adı"/></label>
+            <label>Belge dosyası (PDF, JPG veya PNG · en fazla 10 MB)<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={e=>setCredentialFile(e.target.files?.[0] || null)} required/></label>
+            <button className="auth-submit" type="submit" disabled={profileBusy}>Onaylı profile belge ekle</button>
+          </form>}
           {verificationStatus!=='pending' && verificationStatus!=='approved' && <form onSubmit={submitVerification}>
             <label>Belge türü<select value={credentialType} onChange={e=>setCredentialType(e.target.value)}><option value="diploma">Diploma</option><option value="license">Mesleki ruhsat / yetki belgesi</option><option value="student_certificate">Öğrenci belgesi</option><option value="other">Diğer</option></select></label>
             <label>Üniversite / kurum<input value={institution} onChange={e=>setInstitution(e.target.value)} placeholder="Kurum adı"/></label>
