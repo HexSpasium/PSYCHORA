@@ -93,6 +93,8 @@ export default function App() {
   const [feedPosts, setFeedPosts] = useState<any[]>([])
   const [feedBusy, setFeedBusy] = useState(false)
   const [postDraft, setPostDraft] = useState('')
+  const [postImage, setPostImage] = useState<File | null>(null)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [postBusy, setPostBusy] = useState(false)
   const [commentDrafts, setCommentDrafts] = useState<Record<string,string>>({})
   const [followStats, setFollowStats] = useState({ followers: 0, following: 0 })
@@ -108,23 +110,25 @@ export default function App() {
       if (error) throw error
       const postIds = (posts || []).map((p:any) => p.id)
       const authorIds = [...new Set((posts || []).map((p:any) => p.author_id))]
-      const [{ data: authors, error: authorError }, { data: reactions, error: reactionError }, { data: comments, error: commentError }, { data: follows, error: followError }] = await Promise.all([
+      const [{ data: authors, error: authorError }, { data: reactions, error: reactionError }, { data: comments, error: commentError }, { data: follows, error: followError }, { data: media, error: mediaError }] = await Promise.all([
         authorIds.length ? supabase.from('profiles').select('id,display_name,professional_title,avatar_url').in('id', authorIds) : Promise.resolve({data:[],error:null}),
         postIds.length ? supabase.from('post_reactions').select('id,post_id,user_id,reaction_type').in('post_id', postIds) : Promise.resolve({data:[],error:null}),
         postIds.length ? supabase.from('comments').select('id,post_id,author_id,content,created_at').in('post_id', postIds).eq('is_deleted',false).order('created_at',{ascending:true}) : Promise.resolve({data:[],error:null}),
         supabase.from('follows').select('follower_id,following_id').or('follower_id.eq.'+session.user.id+',following_id.eq.'+session.user.id),
+        postIds.length ? supabase.from('post_media').select('id,post_id,media_type,storage_path,file_name').in('post_id',postIds).order('position') : Promise.resolve({data:[],error:null}),
       ])
       if (authorError) throw authorError
       if (reactionError) throw reactionError
       if (commentError) throw commentError
       if (followError) throw followError
+      if (mediaError) throw mediaError
       const commentAuthorIds = [...new Set((comments || []).map((c:any)=>c.author_id).filter((id:string)=>!authorIds.includes(id)))]
       const { data: commentAuthors, error: commentAuthorsError } = commentAuthorIds.length
         ? await supabase.from('profiles').select('id,display_name,avatar_url').in('id',commentAuthorIds)
         : {data:[],error:null}
       if (commentAuthorsError) throw commentAuthorsError
       const authorMap = new Map([...(authors || []), ...(commentAuthors || [])].map((p:any)=>[p.id,p]))
-      setFeedPosts((posts || []).map((p:any)=>({...p, author:authorMap.get(p.author_id), reactions:(reactions || []).filter((r:any)=>r.post_id===p.id), comments:(comments || []).filter((c:any)=>c.post_id===p.id).map((c:any)=>({...c,author:authorMap.get(c.author_id)}))})))
+      setFeedPosts((posts || []).map((p:any)=>({...p, author:authorMap.get(p.author_id), media:(media || []).filter((m:any)=>m.post_id===p.id).map((m:any)=>({...m,url:supabase.storage.from('social-media').getPublicUrl(m.storage_path).data.publicUrl})), reactions:(reactions || []).filter((r:any)=>r.post_id===p.id), comments:(comments || []).filter((c:any)=>c.post_id===p.id).map((c:any)=>({...c,author:authorMap.get(c.author_id)}))})))
       setFollowStats({
         followers:(follows || []).filter((f:any)=>f.following_id===session.user.id).length,
         following:(follows || []).filter((f:any)=>f.follower_id===session.user.id).length,
@@ -140,9 +144,20 @@ export default function App() {
     event.preventDefault()
     if (!session?.user || !postDraft.trim()) return
     setPostBusy(true)
-    const { error } = await supabase.from('posts').insert({author_id:session.user.id,content:postDraft.trim(),visibility:'public'})
+    const { data: post, error } = await supabase.from('posts').insert({author_id:session.user.id,content:postDraft.trim(),visibility:'public'}).select('id').single()
     if (error) setNotificationError(error.message)
-    else { setPostDraft(''); await loadFeed() }
+    else {
+      if (postImage) {
+        const path = session.user.id + '/posts/' + crypto.randomUUID() + '-' + postImage.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+        const { error: uploadError } = await supabase.storage.from('social-media').upload(path,postImage,{contentType:postImage.type,upsert:false})
+        if (uploadError) setNotificationError('Gönderi metni paylaşıldı ancak fotoğraf yüklenemedi: ' + uploadError.message)
+        else {
+          const { error: mediaInsertError } = await supabase.from('post_media').insert({post_id:post.id,media_type:'image',storage_path:path,file_name:postImage.name,mime_type:postImage.type,file_size:postImage.size,position:0})
+          if (mediaInsertError) setNotificationError('Fotoğraf kaydı oluşturulamadı: ' + mediaInsertError.message)
+        }
+      }
+      setPostDraft(''); setPostImage(null); await loadFeed()
+    }
     setPostBusy(false)
   }
 
@@ -467,7 +482,7 @@ export default function App() {
     setProfileOpen(true); setProfileBusy(true); setProfileError(''); setProfileMessage('')
     try {
       const [{ data: p, error: pe }, { data: requests, error: re }, { data: allSpecialties, error: se }, { data: mine, error: me }, { data: roles, error: ae }, { data: credentials, error: ce }] = await Promise.all([
-        supabase.from('profiles').select('display_name,professional_title,bio,profile_visibility').eq('id', session.user.id).maybeSingle(),
+        supabase.from('profiles').select('display_name,professional_title,bio,profile_visibility,avatar_url').eq('id', session.user.id).maybeSingle(),
         supabase.from('verification_requests').select('status').eq('user_id', session.user.id).order('created_at', { ascending: false }).limit(1),
         supabase.from('specialties').select('id,name_tr').eq('is_active', true).order('name_tr'),
         supabase.from('user_specialties').select('specialty_id').eq('user_id', session.user.id),
@@ -481,7 +496,7 @@ export default function App() {
       if (ae) throw ae
       if (ce) throw ce
       setMyCredentials(credentials || [])
-      setProfile({ display_name: p?.display_name || String(session.user.user_metadata?.full_name || ''), professional_title: p?.professional_title || '', bio: p?.bio || '', profile_visibility: p?.profile_visibility || 'public' })
+      setProfile({ display_name: p?.display_name || String(session.user.user_metadata?.full_name || ''), professional_title: p?.professional_title || '', bio: p?.bio || '', profile_visibility: p?.profile_visibility || 'public', avatar_url: p?.avatar_url || '' })
       setVerificationStatus(requests?.[0]?.status || '')
       setSpecialties(allSpecialties || [])
       setSelectedSpecialties((mine || []).map((x: {specialty_id:string}) => x.specialty_id))
@@ -495,8 +510,16 @@ export default function App() {
     if (!session?.user) return
     setProfileBusy(true); setProfileError(''); setProfileMessage('')
     try {
-      const { error } = await supabase.from('profiles').update({ ...profile, updated_at: new Date().toISOString() }).eq('id', session.user.id)
+      let avatarUrl = (profile as any).avatar_url || ''
+      if (avatarFile) {
+        const path = session.user.id + '/avatars/' + crypto.randomUUID() + '-' + avatarFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')
+        const { error: uploadError } = await supabase.storage.from('social-media').upload(path,avatarFile,{contentType:avatarFile.type,upsert:false})
+        if (uploadError) throw uploadError
+        avatarUrl = supabase.storage.from('social-media').getPublicUrl(path).data.publicUrl
+      }
+      const { error } = await supabase.from('profiles').update({ ...profile, avatar_url:avatarUrl, updated_at: new Date().toISOString() }).eq('id', session.user.id)
       if (error) throw error
+      setProfile(old=>({...old,avatar_url:avatarUrl} as any)); setAvatarFile(null)
       const { error: deleteError } = await supabase.from('user_specialties').delete().eq('user_id', session.user.id)
       if (deleteError) throw deleteError
       if (selectedSpecialties.length) {
@@ -662,8 +685,8 @@ export default function App() {
       <div className="social-layout">
         <aside className="social-sidebar"><div className="social-user-card"><div className="social-avatar">{(profile.display_name || session.user.user_metadata?.full_name || session.user.email || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><strong>{profile.display_name || session.user.user_metadata?.full_name || 'Profilin'}</strong><small>{profile.professional_title || 'Psikoloji profesyoneli'}</small></div><a href="#social-feed">⌂ Akış</a><a href="#professionals">⌕ Keşfet</a><a href="#social-network">♧ Takip ağım</a><button type="button" onClick={()=>void openProfile()}>Profilimi düzenle</button></aside>
         <div className="social-main-column">
-          <form className="post-composer" onSubmit={createPost}><div className="composer-head"><div className="social-avatar">{(profile.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><strong>Bir düşünce paylaş…</strong></div><textarea value={postDraft} onChange={e=>setPostDraft(e.target.value)} rows={3} maxLength={20000} placeholder="Mesleki bir düşünce, kaynak veya deneyim paylaş."/><div className="composer-footer"><small>{postDraft.length}/20000 · Herkese açık gönderi</small><button className="primary" disabled={postBusy || !postDraft.trim()}>{postBusy?'Paylaşılıyor…':'Paylaş'}</button></div></form>
-          {feedBusy && !feedPosts.length ? <p className="social-empty">Akış yükleniyor…</p> : feedPosts.length ? feedPosts.map((post:any)=><article className="feed-post" key={post.id}><div className="feed-post-head"><div className="social-avatar">{(post.author?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div><strong>{post.author?.display_name || 'PSYCHORA üyesi'}</strong><small>{post.author?.professional_title || 'Psikoloji profesyoneli'} · {new Date(post.created_at).toLocaleString('tr-TR',{dateStyle:'medium',timeStyle:'short'})}</small></div></div><p className="feed-post-content">{post.content}</p><div className="feed-post-actions"><button type="button" onClick={()=>void toggleReaction(post)}>{post.reactions.some((r:any)=>r.user_id===session.user.id && r.reaction_type==='like')?'♥ Beğendin':'♡ Beğen'} · {post.reactions.length}</button><span>Yorumlar · {post.comments.length}</span></div><div className="feed-comments">{post.comments.map((comment:any)=><div className="feed-comment" key={comment.id}><strong>{comment.author?.display_name || 'Üye'}</strong><span>{comment.content}</span></div>)}</div><form className="comment-compose" onSubmit={e=>void addComment(e,post.id)}><input value={commentDrafts[post.id] || ''} onChange={e=>setCommentDrafts(old=>({...old,[post.id]:e.target.value}))} placeholder="Yorum yaz…" maxLength={10000}/><button type="submit" disabled={!(commentDrafts[post.id] || '').trim()}>Gönder</button></form></article>) : <p className="social-empty">Henüz paylaşım yok. İlk gönderiyi sen oluştur.</p>}
+          <form className="post-composer" onSubmit={createPost}><div className="composer-head"><div className="social-avatar">{(profile.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><strong>Bir düşünce paylaş…</strong></div><textarea value={postDraft} onChange={e=>setPostDraft(e.target.value)} rows={3} maxLength={20000} placeholder="Mesleki bir düşünce, kaynak veya deneyim paylaş."/><div className="composer-footer"><label className="post-image-picker">＋ Fotoğraf<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setPostImage(e.target.files?.[0] || null)} /></label><small>{postImage ? postImage.name : postDraft.length + `/20000 · Herkese açık gönderi`}</small><button className="primary" disabled={postBusy || !postDraft.trim()}>{postBusy?'Paylaşılıyor…':'Paylaş'}</button></div></form>
+          {feedBusy && !feedPosts.length ? <p className="social-empty">Akış yükleniyor…</p> : feedPosts.length ? feedPosts.map((post:any)=><article className="feed-post" key={post.id}><div className="feed-post-head"><div className="social-avatar">{(post.author?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div><strong>{post.author?.display_name || 'PSYCHORA üyesi'}</strong><small>{post.author?.professional_title || 'Psikoloji profesyoneli'} · {new Date(post.created_at).toLocaleString('tr-TR',{dateStyle:'medium',timeStyle:'short'})}</small></div></div><p className="feed-post-content">{post.content}</p>{post.media?.map((m:any)=><img className="feed-post-image" key={m.id} src={m.url} alt={m.file_name || "Gönderi fotoğrafı"} />)}<div className="feed-post-actions"><button type="button" onClick={()=>void toggleReaction(post)}>{post.reactions.some((r:any)=>r.user_id===session.user.id && r.reaction_type==='like')?'♥ Beğendin':'♡ Beğen'} · {post.reactions.length}</button><span>Yorumlar · {post.comments.length}</span></div><div className="feed-comments">{post.comments.map((comment:any)=><div className="feed-comment" key={comment.id}><strong>{comment.author?.display_name || 'Üye'}</strong><span>{comment.content}</span></div>)}</div><form className="comment-compose" onSubmit={e=>void addComment(e,post.id)}><input value={commentDrafts[post.id] || ''} onChange={e=>setCommentDrafts(old=>({...old,[post.id]:e.target.value}))} placeholder="Yorum yaz…" maxLength={10000}/><button type="submit" disabled={!(commentDrafts[post.id] || '').trim()}>Gönder</button></form></article>) : <p className="social-empty">Henüz paylaşım yok. İlk gönderiyi sen oluştur.</p>}
         </div>
         <aside className="social-right-card"><strong>Profesyonel ağın</strong><div><b>{followStats.followers}</b><small>Takipçi</small></div><div><b>{followStats.following}</b><small>Takip edilen</small></div><a href="#professionals">Yeni profesyoneller keşfet ↗</a><a href="#social-network">Ağımı görüntüle</a></aside>
       </div>
@@ -727,6 +750,7 @@ export default function App() {
         <div className="auth-mark">Ψ</div><div className="eyebrow">PSYCHORA PROFESSIONAL</div><h2 id="profile-title">Profesyonel profilin</h2>
         {profileBusy ? <p>Yükleniyor…</p> : <>
           <form onSubmit={saveProfile}>
+            <label>Profil fotoğrafı (JPG, PNG veya WebP · en fazla 10 MB)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setAvatarFile(e.target.files?.[0] || null)}/>{(profile as any).avatar_url && <img className="profile-avatar-preview" src={(profile as any).avatar_url} alt="Mevcut profil fotoğrafı" />}</label>
             <label>Ad soyad<input required value={profile.display_name} onChange={e=>setProfile({...profile,display_name:e.target.value})}/></label>
             <label>Mesleki unvan<input value={profile.professional_title} onChange={e=>setProfile({...profile,professional_title:e.target.value})} placeholder="Örn. Klinik Psikolog"/></label>
             <label>Kısa biyografi<textarea rows={4} value={profile.bio} onChange={e=>setProfile({...profile,bio:e.target.value})} placeholder="Mesleki ilgi alanların ve deneyimin"/></label>
