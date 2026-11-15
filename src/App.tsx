@@ -90,6 +90,82 @@ export default function App() {
     } finally { setDirectoryBusy(false) }
   }
 
+  const [feedPosts, setFeedPosts] = useState<any[]>([])
+  const [feedBusy, setFeedBusy] = useState(false)
+  const [postDraft, setPostDraft] = useState('')
+  const [postBusy, setPostBusy] = useState(false)
+  const [commentDrafts, setCommentDrafts] = useState<Record<string,string>>({})
+  const [followStats, setFollowStats] = useState({ followers: 0, following: 0 })
+  const [socialTab, setSocialTab] = useState<'feed'|'discover'|'network'>('feed')
+
+  const loadFeed = async () => {
+    if (!session?.user) { setFeedPosts([]); return }
+    setFeedBusy(true)
+    try {
+      const { data: posts, error } = await supabase.from('posts')
+        .select('id,author_id,content,visibility,created_at')
+        .eq('is_deleted', false).order('created_at', { ascending: false }).limit(50)
+      if (error) throw error
+      const postIds = (posts || []).map((p:any) => p.id)
+      const authorIds = [...new Set((posts || []).map((p:any) => p.author_id))]
+      const [{ data: authors, error: authorError }, { data: reactions, error: reactionError }, { data: comments, error: commentError }, { data: follows, error: followError }] = await Promise.all([
+        authorIds.length ? supabase.from('profiles').select('id,display_name,professional_title,avatar_url').in('id', authorIds) : Promise.resolve({data:[],error:null}),
+        postIds.length ? supabase.from('post_reactions').select('id,post_id,user_id,reaction_type').in('post_id', postIds) : Promise.resolve({data:[],error:null}),
+        postIds.length ? supabase.from('comments').select('id,post_id,author_id,content,created_at').in('post_id', postIds).eq('is_deleted',false).order('created_at',{ascending:true}) : Promise.resolve({data:[],error:null}),
+        supabase.from('follows').select('follower_id,following_id').or('follower_id.eq.'+session.user.id+',following_id.eq.'+session.user.id),
+      ])
+      if (authorError) throw authorError
+      if (reactionError) throw reactionError
+      if (commentError) throw commentError
+      if (followError) throw followError
+      const commentAuthorIds = [...new Set((comments || []).map((c:any)=>c.author_id).filter((id:string)=>!authorIds.includes(id)))]
+      const { data: commentAuthors, error: commentAuthorsError } = commentAuthorIds.length
+        ? await supabase.from('profiles').select('id,display_name,avatar_url').in('id',commentAuthorIds)
+        : {data:[],error:null}
+      if (commentAuthorsError) throw commentAuthorsError
+      const authorMap = new Map([...(authors || []), ...(commentAuthors || [])].map((p:any)=>[p.id,p]))
+      setFeedPosts((posts || []).map((p:any)=>({...p, author:authorMap.get(p.author_id), reactions:(reactions || []).filter((r:any)=>r.post_id===p.id), comments:(comments || []).filter((c:any)=>c.post_id===p.id).map((c:any)=>({...c,author:authorMap.get(c.author_id)}))})))
+      setFollowStats({
+        followers:(follows || []).filter((f:any)=>f.following_id===session.user.id).length,
+        following:(follows || []).filter((f:any)=>f.follower_id===session.user.id).length,
+      })
+    } catch (error) {
+      setNotificationError(error instanceof Error ? error.message : 'Akış yüklenemedi.')
+    } finally { setFeedBusy(false) }
+  }
+
+  useEffect(() => { if (session?.user?.id) void loadFeed(); else { setFeedPosts([]); setFollowStats({followers:0,following:0}) } }, [session?.user?.id])
+
+  const createPost = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!session?.user || !postDraft.trim()) return
+    setPostBusy(true)
+    const { error } = await supabase.from('posts').insert({author_id:session.user.id,content:postDraft.trim(),visibility:'public'})
+    if (error) setNotificationError(error.message)
+    else { setPostDraft(''); await loadFeed() }
+    setPostBusy(false)
+  }
+
+  const toggleReaction = async (post:any) => {
+    if (!session?.user) return
+    const existing = (post.reactions || []).find((r:any)=>r.user_id===session.user.id && r.reaction_type==='like')
+    const result = existing
+      ? await supabase.from('post_reactions').delete().eq('id',existing.id)
+      : await supabase.from('post_reactions').insert({post_id:post.id,user_id:session.user.id,reaction_type:'like'})
+    if (result.error) setNotificationError(result.error.message)
+    else await loadFeed()
+  }
+
+  const addComment = async (event:FormEvent<HTMLFormElement>, postId:string) => {
+    event.preventDefault()
+    if (!session?.user) return
+    const content=(commentDrafts[postId] || '').trim()
+    if (!content) return
+    const {error}=await supabase.from('comments').insert({post_id:postId,author_id:session.user.id,content})
+    if (error) setNotificationError(error.message)
+    else { setCommentDrafts(old=>({...old,[postId]:''})); await loadFeed() }
+  }
+
   const filteredDirectory = useMemo(() => directory.filter(person => {
     const term = directorySearch.trim().toLocaleLowerCase('tr')
     const text = [person.display_name, person.professional_title, person.bio, ...(person.specialties || [])].filter(Boolean).join(' ').toLocaleLowerCase('tr')
@@ -578,9 +654,21 @@ export default function App() {
   }
 
   return <main className="page">
-    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav><a href="#fields">Uzmanlıklar</a><a href="#turkiye">Türkiye</a><a href="#about">Hakkında</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><div className="notification-wrap"><button className="notification-trigger" type="button" aria-expanded={notificationOpen} aria-label={'Bildirimler, ' + allNotifications.length + ' kayıt'} onClick={() => { setNotificationOpen(value => !value); setShowAllNotifications(false); void loadIncomingRequests(); void loadUnreadMessages() }}><span className="notification-bell">♧</span> Bildirimler{allNotifications.length > 0 && <b className="notification-count">{allNotifications.length > 99 ? '99+' : allNotifications.length}</b>}</button>{notificationOpen && <section className="notification-panel" aria-label="Bildirimler"><div className="notification-panel-heading"><strong>Bildirimler</strong><span>{allNotifications.length} kayıt</span></div>{notificationError && <p className="notification-error">{notificationError}</p>}{visibleNotifications.map((notification: any) => notification.kind === 'message' ? <button type="button" className="notification-item notification-message-item" key={notification.id} onClick={() => void openMessageNotification(notification.item)}><span className="notification-avatar">{(notification.item.sender?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</span><span className="notification-content"><strong>{notification.item.sender?.display_name || 'Bir profesyonel'}</strong><span>Mesaj: {(notification.item.content || '').slice(0, 90)}{(notification.item.content || '').length > 90 ? '…' : ''}</span><time>{new Date(notification.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><small>{notification.item.read_at ? 'Okundu' : 'Okunmadı'}</small></span></button> : <article className="notification-item" key={notification.id}><div className="notification-avatar">{(notification.item.requester?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div className="notification-content"><strong>{notification.item.requester?.display_name || 'Bir profesyonel'}</strong><span>{notification.item.requester?.professional_title || 'Psikoloji profesyoneli'} bağlantı isteği gönderdi.</span><time>{new Date(notification.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><small>{notification.item.status === 'pending' ? 'Yanıt bekliyor' : notification.item.status === 'accepted' ? 'Kabul edildi' : 'Reddedildi'}</small>{notification.item.status === 'pending' && <div className="notification-actions"><button type="button" onClick={() => void respondToNotification(notification.item,'accepted')}>Kabul et</button><button type="button" onClick={() => void respondToNotification(notification.item,'rejected')}>Reddet</button></div>}</div></article>)}{!allNotifications.length && <p className="notification-empty">Şimdilik yeni bildirimin yok.</p>}{allNotifications.length > 10 && <button type="button" className="notification-show-all" onClick={() => setShowAllNotifications(value => !value)}>{showAllNotifications ? 'Son 10 bildirimi göster' : 'Tümünü gör'}</button>}</section>}</div><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
+    <header className="nav"><a className="logo" href="#">Ψ <span>PSYCHORA<small>THE PSYCHOLOGY NETWORK</small></span></a><nav className="social-main-nav"><a href={session ? "#social-feed" : "#fields"}>Akış</a><a href="#professionals">Keşfet</a><a href="#social-network">Ağım</a><a href="#fields">Profesyonel</a></nav>{session ? <div className="nav-account"><span>{session.user.email}</span><div className="notification-wrap"><button className="notification-trigger" type="button" aria-expanded={notificationOpen} aria-label={'Bildirimler, ' + allNotifications.length + ' kayıt'} onClick={() => { setNotificationOpen(value => !value); setShowAllNotifications(false); void loadIncomingRequests(); void loadUnreadMessages() }}><span className="notification-bell">♧</span> Bildirimler{allNotifications.length > 0 && <b className="notification-count">{allNotifications.length > 99 ? '99+' : allNotifications.length}</b>}</button>{notificationOpen && <section className="notification-panel" aria-label="Bildirimler"><div className="notification-panel-heading"><strong>Bildirimler</strong><span>{allNotifications.length} kayıt</span></div>{notificationError && <p className="notification-error">{notificationError}</p>}{visibleNotifications.map((notification: any) => notification.kind === 'message' ? <button type="button" className="notification-item notification-message-item" key={notification.id} onClick={() => void openMessageNotification(notification.item)}><span className="notification-avatar">{(notification.item.sender?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</span><span className="notification-content"><strong>{notification.item.sender?.display_name || 'Bir profesyonel'}</strong><span>Mesaj: {(notification.item.content || '').slice(0, 90)}{(notification.item.content || '').length > 90 ? '…' : ''}</span><time>{new Date(notification.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><small>{notification.item.read_at ? 'Okundu' : 'Okunmadı'}</small></span></button> : <article className="notification-item" key={notification.id}><div className="notification-avatar">{(notification.item.requester?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div className="notification-content"><strong>{notification.item.requester?.display_name || 'Bir profesyonel'}</strong><span>{notification.item.requester?.professional_title || 'Psikoloji profesyoneli'} bağlantı isteği gönderdi.</span><time>{new Date(notification.created_at).toLocaleString('tr-TR',{dateStyle:'short',timeStyle:'short'})}</time><small>{notification.item.status === 'pending' ? 'Yanıt bekliyor' : notification.item.status === 'accepted' ? 'Kabul edildi' : 'Reddedildi'}</small>{notification.item.status === 'pending' && <div className="notification-actions"><button type="button" onClick={() => void respondToNotification(notification.item,'accepted')}>Kabul et</button><button type="button" onClick={() => void respondToNotification(notification.item,'rejected')}>Reddet</button></div>}</div></article>)}{!allNotifications.length && <p className="notification-empty">Şimdilik yeni bildirimin yok.</p>}{allNotifications.length > 10 && <button type="button" className="notification-show-all" onClick={() => setShowAllNotifications(value => !value)}>{showAllNotifications ? 'Son 10 bildirimi göster' : 'Tümünü gör'}</button>}</section>}</div><button onClick={openProfile}>Profilim</button><button onClick={handleSignOut}>Çıkış yap</button></div> : <button onClick={() => openAuth('signup')}>Profesyonel olarak katıl</button>}</header>
     {session && <div className="session-strip">Oturum açıldı · {session.user.email}</div>}
     {session && notificationToast && <div className="notification-toast" role="status"><span>●</span> {notificationToast} <button type="button" onClick={() => setNotificationOpen(true)}>Görüntüle</button></div>}
+    {session && <section id="social-feed" className="social-shell section">
+      <div className="social-topline"><div><label>PSYCHORA SOCIAL</label><h2>Akışın</h2><p>Mesleki çevrenden güncel paylaşımlar.</p></div><button type="button" className="secondary" onClick={()=>void loadFeed()} disabled={feedBusy}>{feedBusy?'Yükleniyor…':'Akışı yenile'}</button></div>
+      <div className="social-layout">
+        <aside className="social-sidebar"><div className="social-user-card"><div className="social-avatar">{(profile.display_name || session.user.user_metadata?.full_name || session.user.email || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><strong>{profile.display_name || session.user.user_metadata?.full_name || 'Profilin'}</strong><small>{profile.professional_title || 'Psikoloji profesyoneli'}</small></div><a href="#social-feed">⌂ Akış</a><a href="#professionals">⌕ Keşfet</a><a href="#social-network">♧ Takip ağım</a><button type="button" onClick={()=>void openProfile()}>Profilimi düzenle</button></aside>
+        <div className="social-main-column">
+          <form className="post-composer" onSubmit={createPost}><div className="composer-head"><div className="social-avatar">{(profile.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><strong>Bir düşünce paylaş…</strong></div><textarea value={postDraft} onChange={e=>setPostDraft(e.target.value)} rows={3} maxLength={20000} placeholder="Mesleki bir düşünce, kaynak veya deneyim paylaş."/><div className="composer-footer"><small>{postDraft.length}/20000 · Herkese açık gönderi</small><button className="primary" disabled={postBusy || !postDraft.trim()}>{postBusy?'Paylaşılıyor…':'Paylaş'}</button></div></form>
+          {feedBusy && !feedPosts.length ? <p className="social-empty">Akış yükleniyor…</p> : feedPosts.length ? feedPosts.map((post:any)=><article className="feed-post" key={post.id}><div className="feed-post-head"><div className="social-avatar">{(post.author?.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div><div><strong>{post.author?.display_name || 'PSYCHORA üyesi'}</strong><small>{post.author?.professional_title || 'Psikoloji profesyoneli'} · {new Date(post.created_at).toLocaleString('tr-TR',{dateStyle:'medium',timeStyle:'short'})}</small></div></div><p className="feed-post-content">{post.content}</p><div className="feed-post-actions"><button type="button" onClick={()=>void toggleReaction(post)}>{post.reactions.some((r:any)=>r.user_id===session.user.id && r.reaction_type==='like')?'♥ Beğendin':'♡ Beğen'} · {post.reactions.length}</button><span>Yorumlar · {post.comments.length}</span></div><div className="feed-comments">{post.comments.map((comment:any)=><div className="feed-comment" key={comment.id}><strong>{comment.author?.display_name || 'Üye'}</strong><span>{comment.content}</span></div>)}</div><form className="comment-compose" onSubmit={e=>void addComment(e,post.id)}><input value={commentDrafts[post.id] || ''} onChange={e=>setCommentDrafts(old=>({...old,[post.id]:e.target.value}))} placeholder="Yorum yaz…" maxLength={10000}/><button type="submit" disabled={!(commentDrafts[post.id] || '').trim()}>Gönder</button></form></article>) : <p className="social-empty">Henüz paylaşım yok. İlk gönderiyi sen oluştur.</p>}
+        </div>
+        <aside className="social-right-card"><strong>Profesyonel ağın</strong><div><b>{followStats.followers}</b><small>Takipçi</small></div><div><b>{followStats.following}</b><small>Takip edilen</small></div><a href="#professionals">Yeni profesyoneller keşfet ↗</a><a href="#social-network">Ağımı görüntüle</a></aside>
+      </div>
+    </section>}
+    {session && <section id="social-network" className="section social-network-section"><label>YOUR PROFESSIONAL NETWORK</label><h2>Takip ağın</h2><p>Takipçi ve takip ettiklerini profilinden kategori halinde görüntüleyebilirsin.</p><div className="network-stats"><span><b>{followStats.followers}</b> Takipçi</span><span><b>{followStats.following}</b> Takip edilen</span><button type="button" onClick={()=>void loadFeed()}>Ağı yenile</button></div></section>}
     <section className="hero"><div className="eyebrow">TÜRKİYE'DEN DÜNYAYA</div><h1>Psikolojinin<br/><em>buluşma noktası.</em></h1><p>Psikoloji profesyonelleri için bilgi, mesleki bağlantı ve iş birliğinin buluştuğu yeni nesil profesyonel ağ.</p><button className="primary" onClick={() => session ? document.getElementById('fields')?.scrollIntoView({ behavior: 'smooth' }) : openAuth('signup')}>{session ? 'Ağı keşfet ↗' : 'Ücretsiz katıl ↗'}</button></section>
     <section className="stats"><div><b>81</b><span>Türkiye ili</span></div><div><b>12+</b><span>Uzmanlık kümesi</span></div><div><b>GLOBAL</b><span>Uluslararası mimari</span></div></section>
     <section id="fields" className="section"><label>DISCOVER YOUR FIELD</label><h2>Psikolojinin farklı <em>uzmanlıkları.</em></h2><div className="cards">{SPECIALTY_GROUPS.map(s=><article key={s.id}><small>{s.id.toUpperCase()}</small><h3>{s.name}</h3><p>{s.topics.join(' · ')}</p></article>)}</div></section>
