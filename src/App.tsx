@@ -24,7 +24,7 @@ export default function App() {
   const [profileViewOpen, setProfileViewOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'account'|'contact'|'privacy'|'appearance'>('account')
-  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('psychora-theme') === 'dark')
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('psychora-theme') !== 'light')
   const [emailNotifications, setEmailNotifications] = useState(() => localStorage.getItem('psychora-email-notifications') !== 'off')
   const [pushNotifications, setPushNotifications] = useState(() => localStorage.getItem('psychora-push-notifications') !== 'off')
   const [profileBusy, setProfileBusy] = useState(false)
