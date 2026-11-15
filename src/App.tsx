@@ -178,13 +178,35 @@ export default function App() {
 
   const loadAdminRequests = async () => {
     if (!session?.user || !isAdmin) return
-    setAdminBusy(true)
+    setAdminBusy(true); setProfileError(''); setProfileMessage('')
     try {
-      const { data, error } = await supabase.from('verification_requests').select('id,user_id,status,applicant_note,created_at,profiles(display_name,professional_title),professional_credentials(credential_type,institution,document_path)').order('created_at', { ascending: false })
-      if (error) throw error
-      setAdminRequests(data || [])
-    } catch (error) { setProfileError(error instanceof Error ? error.message : 'Başvurular yüklenemedi.') }
-    finally { setAdminBusy(false) }
+      const { data: requests, error: requestError } = await supabase
+        .from('verification_requests')
+        .select('id,user_id,status,applicant_note,created_at')
+        .order('created_at', { ascending: false })
+      if (requestError) throw requestError
+      const userIds = [...new Set((requests || []).map((item: any) => item.user_id))]
+      const [{ data: profiles, error: profilesError }, { data: credentials, error: credentialsError }] = userIds.length
+        ? await Promise.all([
+            supabase.from('profiles').select('id,display_name,professional_title').in('id', userIds),
+            supabase.from('professional_credentials').select('user_id,credential_type,institution,document_path,created_at').in('user_id', userIds).order('created_at', { ascending: false }),
+          ])
+        : [{ data: [], error: null }, { data: [], error: null }]
+      if (profilesError) throw profilesError
+      if (credentialsError) throw credentialsError
+      const profileById = new Map((profiles || []).map((item: any) => [item.id, item]))
+      const credentialsByUser = new Map<string, any[]>()
+      for (const item of credentials || []) credentialsByUser.set(item.user_id, [...(credentialsByUser.get(item.user_id) || []), item])
+      setAdminRequests((requests || []).map((item: any) => ({
+        ...item,
+        profiles: profileById.get(item.user_id) || null,
+        professional_credentials: credentialsByUser.get(item.user_id) || [],
+      })))
+      setProfileMessage((requests || []).length ? 'Başvurular yüklendi.' : 'Henüz doğrulama başvurusu bulunmuyor.')
+    } catch (error) {
+      const detail = error as { message?: string; code?: string; details?: string; hint?: string }
+      setProfileError([detail?.message || 'Başvurular yüklenemedi.', detail?.code, detail?.details, detail?.hint].filter(Boolean).join(' · '))
+    } finally { setAdminBusy(false) }
   }
 
   const reviewVerification = async (request: any, status: 'approved' | 'rejected') => {
