@@ -98,7 +98,6 @@ export default function App() {
   const [postBusy, setPostBusy] = useState(false)
   const [commentDrafts, setCommentDrafts] = useState<Record<string,string>>({})
   const [followStats, setFollowStats] = useState({ followers: 0, following: 0 })
-  const [socialTab, setSocialTab] = useState<'feed'|'discover'|'network'>('feed')
 
   const loadFeed = async () => {
     if (!session?.user) { setFeedPosts([]); return }
