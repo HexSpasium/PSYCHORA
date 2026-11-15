@@ -40,6 +40,7 @@ export default function App() {
   const [directoryLoaded, setDirectoryLoaded] = useState(false)
   const [directorySearch, setDirectorySearch] = useState('')
   const [directorySpecialty, setDirectorySpecialty] = useState('')
+  const [selectedProfessional, setSelectedProfessional] = useState<any | null>(null)
 
   const loadDirectory = async () => {
     if (!session?.user) return
@@ -358,18 +359,32 @@ export default function App() {
           <select value={directorySpecialty} onChange={e=>setDirectorySpecialty(e.target.value)}><option value="">Tüm uzmanlık alanları</option>{specialties.length ? specialties.map(s=><option key={s.id} value={s.name_tr}>{s.name_tr}</option>) : [...new Set(directory.flatMap(p=>p.specialties))].sort().map(s=><option key={s} value={s}>{s}</option>)}</select>
           <button type="button" onClick={loadDirectory} disabled={directoryBusy}>{directoryBusy ? 'Yükleniyor…' : 'Yenile'}</button>
         </div>
-        {directoryBusy && !directoryLoaded ? <p>Profesyoneller yükleniyor…</p> : filteredDirectory.length ? <div className="directory-grid">{filteredDirectory.map(person=><article className="directory-card" key={person.id}>
+        {directoryBusy && !directoryLoaded ? <p>Profesyoneller yükleniyor…</p> : filteredDirectory.length ? <div className="directory-grid">{filteredDirectory.map(person=><article className="directory-card directory-card-clickable" key={person.id} role="button" tabIndex={0} onClick={() => setSelectedProfessional(person)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedProfessional(person) } }}>
           <div className="directory-avatar">{(person.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
           <div className="directory-person"><h3>{person.display_name || 'İsimsiz profesyonel'} {person.verification_status==='verified' && <span className="verified-mark" title="Mesleki doğrulaması onaylandı">✓ Doğrulandı</span>}</h3>
           <b>{person.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
           {person.bio && <p>{person.bio}</p>}
-          <div className="directory-tags">{person.specialties.map((s:string)=><span key={s}>{s}</span>)}</div></div>
+          <div className="directory-tags">{person.specialties.map((s:string)=><span key={s}>{s}</span>)}</div><button className="profile-detail-link" type="button" onClick={e=>{e.stopPropagation();setSelectedProfessional(person)}}>Profili görüntüle ↗</button></div>
         </article>)}</div> : <p>{directoryLoaded ? 'Aramana uygun herkese açık profesyonel profili bulunamadı.' : 'Profesyonel profiller şu anda yüklenemedi. Yenile butonunu kullanabilirsin.'}</p>}
       </>}
     </section>
     <section id="turkiye" className="section location"><label>TÜRKİYE FIRST · GLOBAL BY DESIGN</label><h2>81 ilden, <em>dünyaya açılan ağ.</em></h2><p>İlk odağımız Türkiye'nin 81 ili. Altyapı farklı ülkeler ve bölgelere genişleyebilecek şekilde tasarlanıyor.</p><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Şehir ara..."/><div className="cities">{provinces.map(p=><button className={city===p?'chosen':''} key={p} onClick={()=>setCity(p)}>{p}</button>)}</div>{city && <p className="chosen-text">Seçilen şehir: {city}</p>}</section>
     <section id="about" className="section about"><label>ONE PROFESSION. ONE NETWORK.</label><h2>Mesleki dünyanın ortak zemini.</h2><p>PSYCHORA; psikoloji profesyonellerini bilimsel paylaşım, mesleki bağlantı ve profesyonel gelişim için bir araya getirmeyi amaçlar.</p>{!session && <button className="primary" onClick={() => openAuth('signup')}>PSYCHORA'ya katıl ↗</button>}</section>
     <footer>© {new Date().getFullYear()} PSYCHORA · Türkiye'den dünyaya.</footer>
+
+    {selectedProfessional && <div className="auth-backdrop professional-detail-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setSelectedProfessional(null) }}>
+      <section className="professional-detail" role="dialog" aria-modal="true" aria-labelledby="professional-detail-title">
+        <button className="auth-close" aria-label="Kapat" onClick={() => setSelectedProfessional(null)}>×</button>
+        <div className="professional-detail-heading">
+          <div className="directory-avatar professional-detail-avatar">{(selectedProfessional.display_name || 'P').trim().charAt(0).toLocaleUpperCase('tr')}</div>
+          <div><div className="eyebrow">PSYCHORA PROFESSIONAL</div><h2 id="professional-detail-title">{selectedProfessional.display_name || 'İsimsiz profesyonel'}</h2><b>{selectedProfessional.professional_title || 'Mesleki unvan belirtilmemiş'}</b>
+          {selectedProfessional.verification_status === 'verified' && <span className="verified-mark">✓ Mesleki doğrulama onaylandı</span>}</div>
+        </div>
+        <div className="professional-detail-section"><h3>Hakkında</h3><p>{selectedProfessional.bio || 'Bu profesyonel henüz biyografi eklememiş.'}</p></div>
+        <div className="professional-detail-section"><h3>Uzmanlık alanları</h3><div className="directory-tags">{(selectedProfessional.specialties || []).length ? selectedProfessional.specialties.map((s:string)=><span key={s}>{s}</span>) : <small>Henüz uzmanlık alanı eklenmemiş.</small>}</div></div>
+        <p className="professional-detail-privacy">İletişim bilgileri yalnızca profil sahibi tarafından ayrıca paylaşılır. PSYCHORA, özel hesap bilgilerini herkese açık göstermez.</p>
+      </section>
+    </div>}
 
     {profileOpen && <div className="auth-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) setProfileOpen(false) }}>
       <section className="auth-panel profile-panel" role="dialog" aria-modal="true" aria-labelledby="profile-title">
